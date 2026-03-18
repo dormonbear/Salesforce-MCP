@@ -1,3 +1,7 @@
+## [0.9.1](https://github.com/salesforcecli/mcp/compare/mcp-provider-dx-core@0.9.0...mcp-provider-dx-core@0.9.1) (2026-03-18)
+
+
+
 # [0.9.0](https://github.com/salesforcecli/mcp/compare/mcp-provider-dx-core@0.8.0...mcp-provider-dx-core@0.9.0) (2026-03-18)
 
 
