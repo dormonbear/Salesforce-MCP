@@ -84,7 +84,8 @@ export class CreatePullRequest extends McpTool<InputArgsShape, OutputArgsShape> 
           content: [{
             type: "text",
             text: `Error: Username or alias is required. Please provide a valid DevOps Center org username or alias.`
-          }]
+          }],
+          isError: true
         };
       }
       const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
@@ -95,11 +96,18 @@ export class CreatePullRequest extends McpTool<InputArgsShape, OutputArgsShape> 
           content: [{
             type: "text",
             text: `Error: Work item Name is required. Please provide a valid work item Name. Or provide a valid DevOps Center org username or alias.`
-          }]
+          }],
+          isError: true
         };
       }
 
       const result = await createPullRequest(connection, workItem.id);
+      const pr = result.pullRequestResult ?? {};
+      const isError = pr.status === 'Error' || pr.success === false || !!pr.errorMessage;
+      const rawMessage = isError
+        ? (pr.errorMessage || pr.error || pr.message || `Pull request creation failed for work item: ${workItem.id}`)
+        : `Pull request created successfully for work item: ${workItem.id}`;
+      const message = typeof rawMessage === 'string' ? rawMessage : JSON.stringify(rawMessage);
 
       return {
         content: [{
@@ -107,17 +115,19 @@ export class CreatePullRequest extends McpTool<InputArgsShape, OutputArgsShape> 
           text: JSON.stringify({
             workItemId: workItem.id,
             usernameOrAlias: input.usernameOrAlias,
-            message: `Pull request created successfully for work item: ${workItem.id}`,
-            pullRequestData: result.pullRequestResult
+            message,
+            pullRequestData: pr
           }, null, 2)
-        }]
+        }],
+        isError
       };
     } catch (error: any) {
       return {
         content: [{
           type: "text",
           text: `Error creating pull request: ${error.message}`
-        }]
+        }],
+        isError: true
       };
     }
   }
