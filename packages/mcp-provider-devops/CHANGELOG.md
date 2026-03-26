@@ -1,3 +1,12 @@
+## [0.3.1](https://github.com/salesforcecli/mcp/compare/mcp-provider-devops@0.3.0...mcp-provider-devops@0.3.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* Adding reasonong to full promotion confirmation message ([#423](https://github.com/salesforcecli/mcp/issues/423)) ([ded72a3](https://github.com/salesforcecli/mcp/commit/ded72a3ee66ebb5b41e098a54a22b51b14676369))
+
+
+
 # [0.3.0](https://github.com/salesforcecli/mcp/compare/mcp-provider-devops@0.2.2...mcp-provider-devops@0.3.0) (2026-03-25)
 
 
