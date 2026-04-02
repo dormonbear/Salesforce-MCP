@@ -3391,18 +3391,6 @@
     zod "^3.24.2"
     zod-to-json-schema "^3.24.3"
 
-"@salesforce/mcp-provider-devops@0.3.2":
-  version "0.3.2"
-  resolved "https://registry.yarnpkg.com/@salesforce/mcp-provider-devops/-/mcp-provider-devops-0.3.2.tgz#2bfaa62d3f2d276333fd6c1635924d7d35bbd68d"
-  integrity sha512-iQMKiGV7Yuqvuay/HW0fu/ufyVIabV2I4B2+1VumjRuIeyhu9lmM+JAhSMXftyMnw9GVDxA/hQPtPEp6cCOiJw==
-  dependencies:
-    "@modelcontextprotocol/sdk" "^1.18.0"
-    "@salesforce/core" "^8.24.3"
-    "@salesforce/mcp-provider-api" "^0.4.1"
-    "@salesforce/source-deploy-retrieve" "^12.31.7"
-    "@salesforce/ts-types" "^2.0.12"
-    zod "^3.25.76"
-
 "@salesforce/mcp-provider-dx-core@^0.7.0":
   version "0.7.0"
   resolved "https://registry.yarnpkg.com/@salesforce/mcp-provider-dx-core/-/mcp-provider-dx-core-0.7.0.tgz#93fc40d140d9529887edbd9e9518f25304e87ac3"
