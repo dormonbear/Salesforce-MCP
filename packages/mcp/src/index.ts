@@ -24,6 +24,7 @@ import { Telemetry } from './telemetry.js';
 import { SfMcpServer } from './sf-mcp-server.js';
 import { registerToolsets } from './utils/registry-utils.js';
 import { Services } from './services.js';
+import { parseOrgPermissions } from './utils/org-permissions.js';
 
 /**
  * Sanitizes an array of org usernames by replacing specific orgs with a placeholder.
@@ -168,6 +169,10 @@ You can also use special values to control access to orgs:
 
     await Cache.safeSet('allowedOrgs', new Set(flags.orgs));
     this.logToStderr(`Allowed orgs:\n${flags.orgs.map((org) => `- ${org}`).join('\n')}`);
+    const orgPermissions = parseOrgPermissions(process.env.ORG_PERMISSIONS);
+    if (orgPermissions.size > 0) {
+      this.logToStderr(`Org permissions:\n${[...orgPermissions.entries()].map(([org, perm]) => `- ${org}: ${perm}`).join('\n')}`);
+    }
     const server = new SfMcpServer(
       {
         name: 'sf-mcp-server',
@@ -179,6 +184,9 @@ You can also use special values to control access to orgs:
       },
       {
         telemetry: this.telemetry,
+        orgPermissions,
+        authorizedOrgs: flags.orgs,
+        defaultOrg: flags.orgs[0],
       }
     );
 
