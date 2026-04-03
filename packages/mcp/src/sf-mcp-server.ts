@@ -25,9 +25,12 @@ import {
 import { ServerOptions } from '@modelcontextprotocol/sdk/server/index.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import { Logger } from '@salesforce/core';
-import { ZodRawShape } from 'zod';
+import { z, ZodRawShape } from 'zod';
 import { Telemetry } from './telemetry.js';
 import { RateLimiter, RateLimitConfig, createRateLimiter } from './utils/rate-limiter.js';
+import { OrgPermission, canExecute } from './utils/org-permissions.js';
+import { getToolCategory } from './utils/tool-categories.js';
+import { buildApprovalMessage, APPROVAL_SCHEMA } from './utils/approval.js';
 
 type ToolMethodSignatures = {
   tool: McpServer['tool'];
@@ -43,6 +46,12 @@ export type SfMcpServerOptions = ServerOptions & {
   telemetry?: Telemetry;
   /** Optional rate limiting configuration */
   rateLimit?: Partial<RateLimitConfig>;
+  /** Org permission map: alias -> permission level */
+  orgPermissions?: Map<string, OrgPermission>;
+  /** Allowlist of authorized org aliases. Empty means all orgs are allowed. */
+  authorizedOrgs?: string[];
+  /** Default org alias when targetOrg is not provided */
+  defaultOrg?: string;
 };
 
 /**
@@ -62,6 +71,15 @@ export class SfMcpServer extends McpServer implements ToolMethodSignatures {
   /** Rate limiter for controlling tool call frequency */
   private rateLimiter?: RateLimiter;
 
+  /** Org permission map: alias -> permission level */
+  private orgPermissions: Map<string, OrgPermission>;
+
+  /** Allowlist of authorized org aliases. Empty set means all orgs are allowed. */
+  private authorizedOrgs: Set<string>;
+
+  /** Default org alias when targetOrg is not provided */
+  private defaultOrg: string | undefined;
+
   /**
    * Creates a new SfMcpServer instance
    *
@@ -76,6 +94,9 @@ export class SfMcpServer extends McpServer implements ToolMethodSignatures {
       this.rateLimiter = createRateLimiter(options.rateLimit);
       this.logger.debug('Rate limiter initialized', options.rateLimit);
     }
+    this.orgPermissions = options?.orgPermissions ?? new Map();
+    this.authorizedOrgs = new Set(options?.authorizedOrgs ?? []);
+    this.defaultOrg = options?.defaultOrg;
     this.server.oninitialized = (): void => {
       const clientInfo = this.server.getClientVersion();
       if (clientInfo) {
@@ -99,11 +120,74 @@ export class SfMcpServer extends McpServer implements ToolMethodSignatures {
     },
     cb: ToolCallback<InputArgs>
   ): RegisteredTool {
+    // Inject targetOrg into inputSchema
+    const injectedInputSchema = {
+      ...(config.inputSchema ?? {}),
+      targetOrg: z.string().optional().describe('Target org alias or username'),
+    } as unknown as InputArgs & { targetOrg: ReturnType<typeof z.string> };
+
+    const configWithTargetOrg = { ...config, inputSchema: injectedInputSchema };
+
     const wrappedCb = async (
-      args: InputArgs,
+      args: Record<string, unknown>,
       extra: RequestHandlerExtra<ServerRequest, ServerNotification>
     ): Promise<CallToolResult> => {
       this.logger.debug(`Tool ${name} called`);
+
+      // --- Permission middleware (runs before rate limiting) ---
+      const targetOrg = (args.targetOrg as string | undefined) ?? this.defaultOrg;
+      delete args.targetOrg;
+
+      if (!targetOrg) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: 'No target org specified and no default org configured.' }],
+        };
+      }
+
+      if (this.authorizedOrgs.size > 0 && !this.authorizedOrgs.has(targetOrg)) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `Org "${targetOrg}" is not authorized. Only configured orgs are allowed.` }],
+        };
+      }
+
+      const category = getToolCategory(name);
+      const permissionResult = canExecute(this.orgPermissions, targetOrg, category);
+
+      if (permissionResult === 'deny') {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `Operation denied: org "${targetOrg}" is read-only.` }],
+        };
+      }
+
+      if (permissionResult === 'needs-approval') {
+        try {
+          const message = buildApprovalMessage(name, targetOrg, args);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const elicitResult = await (this.server as any).createElicitation({
+            message,
+            requestedSchema: APPROVAL_SCHEMA,
+          });
+
+          if (!elicitResult?.content?.approved) {
+            return {
+              isError: true,
+              content: [{ type: 'text', text: 'Operation cancelled: approval was not granted.' }],
+            };
+          }
+        } catch (err) {
+          return {
+            isError: true,
+            content: [{ type: 'text', text: `Elicitation not supported by this client. Cannot request approval for protected org "${targetOrg}".` }],
+          };
+        }
+      }
+
+      // Inject resolved org as usernameOrAlias for downstream tools
+      args.usernameOrAlias = targetOrg;
+      // --- End permission middleware ---
 
       // Check rate limit before executing tool
       if (this.rateLimiter) {
@@ -135,7 +219,7 @@ export class SfMcpServer extends McpServer implements ToolMethodSignatures {
       }
 
       const startTime = Date.now();
-      const result = await cb(args, extra);
+      const result = await cb(args as unknown as InputArgs, extra);
       const runtimeMs = Date.now() - startTime;
 
       this.logger.debug(`Tool ${name} completed in ${runtimeMs}ms`);
@@ -160,6 +244,7 @@ export class SfMcpServer extends McpServer implements ToolMethodSignatures {
         // https://modelcontextprotocol.io/specification/2025-06-18/schema#calltoolresult
         isError: result.isError ?? false,
         responseCharCount: responseCharCount.toString(),
+        targetOrg: targetOrg ?? '',
       });
 
       this.telemetry?.sendPdpEvent({
@@ -171,7 +256,12 @@ export class SfMcpServer extends McpServer implements ToolMethodSignatures {
       return result;
     };
 
-    const tool = super.registerTool(name, config, wrappedCb as ToolCallback<InputArgs>);
+    const tool = McpServer.prototype.registerTool.call(
+      this,
+      name,
+      configWithTargetOrg,
+      wrappedCb as ToolCallback<typeof injectedInputSchema>
+    ) as RegisteredTool;
     return tool;
   }
 
