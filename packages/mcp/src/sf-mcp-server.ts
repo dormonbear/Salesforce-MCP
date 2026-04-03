@@ -123,7 +123,11 @@ export class SfMcpServer extends McpServer implements ToolMethodSignatures {
     // Inject targetOrg into inputSchema
     const injectedInputSchema = {
       ...(config.inputSchema ?? {}),
-      targetOrg: z.string().optional().describe('Target org alias or username'),
+      targetOrg: z.string().optional().describe(
+        `Target Salesforce org alias or username.` +
+        (this.authorizedOrgs.size > 0 ? ` Authorized orgs: ${[...this.authorizedOrgs].join(', ')}.` : '') +
+        (this.defaultOrg ? ` Default: ${this.defaultOrg}.` : '')
+      ),
     } as unknown as InputArgs & { targetOrg: ReturnType<typeof z.string> };
 
     const configWithTargetOrg = { ...config, inputSchema: injectedInputSchema };
