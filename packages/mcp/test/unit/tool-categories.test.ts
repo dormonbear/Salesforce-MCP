@@ -95,5 +95,38 @@ describe('tool-categories', () => {
     it('should classify create_scratch_org as write', () => {
       expect(getToolCategory('create_scratch_org')).to.equal('write');
     });
+
+    // Additional DX tools
+    it('should classify retrieve_metadata as read', () => {
+      expect(getToolCategory('retrieve_metadata')).to.equal('read');
+    });
+
+    it('should classify run_apex_test as read', () => {
+      expect(getToolCategory('run_apex_test')).to.equal('read');
+    });
+
+    it('should classify run_agent_test as read', () => {
+      expect(getToolCategory('run_agent_test')).to.equal('read');
+    });
+
+    it('should classify open_org as read', () => {
+      expect(getToolCategory('open_org')).to.equal('read');
+    });
+
+    it('should classify resume_tool_operation as read', () => {
+      expect(getToolCategory('resume_tool_operation')).to.equal('read');
+    });
+
+    it('should classify delete_org as write', () => {
+      expect(getToolCategory('delete_org')).to.equal('write');
+    });
+
+    it('should classify assign_permission_set as write', () => {
+      expect(getToolCategory('assign_permission_set')).to.equal('write');
+    });
+
+    it('should classify create_org_snapshot as write', () => {
+      expect(getToolCategory('create_org_snapshot')).to.equal('write');
+    });
   });
 });

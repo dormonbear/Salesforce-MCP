@@ -1,5 +1,6 @@
+import type { ToolCategory } from './tool-categories.js';
+
 export type OrgPermission = 'read-only' | 'full-access' | 'approval-required';
-export type ToolCategory = 'read' | 'write' | 'execute';
 export type PermissionResult = 'allow' | 'deny' | 'needs-approval';
 
 const VALID_PERMISSIONS: Set<string> = new Set(['read-only', 'full-access', 'approval-required']);

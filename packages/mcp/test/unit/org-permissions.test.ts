@@ -4,8 +4,8 @@ import {
   getOrgPermission,
   canExecute,
   type OrgPermission,
-  type ToolCategory,
 } from '../../src/utils/org-permissions.js';
+import type { ToolCategory } from '../../src/utils/tool-categories.js';
 
 describe('org-permissions', () => {
   describe('parseOrgPermissions', () => {
