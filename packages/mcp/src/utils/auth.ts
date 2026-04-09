@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { AuthInfo, Connection, ConfigAggregator, OrgConfigProperties, type OrgAuthorization } from '@salesforce/core';
+import { AuthInfo, Connection, ConfigAggregator, OrgConfigProperties, StateAggregator, type OrgAuthorization } from '@salesforce/core';
 import { type OrgConfigInfo, type SanitizedOrgAuthorization } from '@salesforce/mcp-provider-api';
 import Cache from './cache.js';
 
@@ -42,8 +42,14 @@ export function sanitizeOrgs(orgs: OrgAuthorization[]): SanitizedOrgAuthorizatio
 // This function is the main entry point for Tools to get an allowlisted Connection.
 // The middleware in sf-mcp-server.ts already validates that `username` is in the
 // authorized org list, so we skip redundant per-call config reads here.
-export async function getConnection(username: string): Promise<Connection> {
-  const authInfo = await AuthInfo.create({ username });
+// We still need to resolve aliases to actual usernames since AuthInfo.create()
+// requires the real username (e.g. "user@example.com"), not an alias.
+export async function getConnection(usernameOrAlias: string): Promise<Connection> {
+  // Resolve alias to actual username if needed (lightweight, no config file reads)
+  const stateAggregator = await StateAggregator.getInstance();
+  const resolvedUsername = stateAggregator.aliases.getUsername(usernameOrAlias) ?? usernameOrAlias;
+
+  const authInfo = await AuthInfo.create({ username: resolvedUsername });
   const connection = await Connection.create({ authInfo });
   return connection;
 }

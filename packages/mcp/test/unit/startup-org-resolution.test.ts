@@ -16,7 +16,7 @@
 
 import { expect } from 'chai';
 import sinon from 'sinon';
-import { AuthInfo, ConfigAggregator, Connection } from '@salesforce/core';
+import { AuthInfo, ConfigAggregator, Connection, StateAggregator } from '@salesforce/core';
 import { resolveSymbolicOrgs, getConnection } from '../../src/utils/auth.js';
 import Cache from '../../src/utils/cache.js';
 
@@ -123,6 +123,14 @@ describe('startup org resolution', () => {
   });
 
   describe('getConnection (simplified)', () => {
+    let mockStateAggregator: { aliases: { getUsername: sinon.SinonStub } };
+
+    beforeEach(() => {
+      // Mock StateAggregator to return null for unknown aliases (passthrough)
+      mockStateAggregator = { aliases: { getUsername: sandbox.stub().returns(null) } };
+      sandbox.stub(StateAggregator, 'getInstance').resolves(mockStateAggregator as unknown as StateAggregator);
+    });
+
     it('should directly create AuthInfo and Connection without calling getAllAllowedOrgs', async () => {
       const mockAuthInfo = { getUsername: () => 'user@example.com' };
       const mockConnection = { getUsername: () => 'user@example.com' };
@@ -142,6 +150,22 @@ describe('startup org resolution', () => {
 
       // getAllAllowedOrgs calls listAllAuthorizations — it should NOT be called
       expect(listAllAuthStub.called).to.be.false;
+    });
+
+    it('should resolve aliases to actual usernames before creating AuthInfo', async () => {
+      // Simulate alias "my-alias" resolving to "real-user@example.com"
+      mockStateAggregator.aliases.getUsername.withArgs('my-alias').returns('real-user@example.com');
+
+      const mockAuthInfo = { getUsername: () => 'real-user@example.com' };
+      const mockConnection = { getUsername: () => 'real-user@example.com' };
+
+      const authInfoCreateStub = sandbox.stub(AuthInfo, 'create').resolves(mockAuthInfo as unknown as AuthInfo);
+      sandbox.stub(Connection, 'create').resolves(mockConnection as unknown as Connection);
+
+      await getConnection('my-alias');
+
+      // Should pass the resolved username, not the alias
+      expect(authInfoCreateStub.firstCall.args[0]).to.deep.equal({ username: 'real-user@example.com' });
     });
 
     it('should reject with meaningful error when AuthInfo.create fails', async () => {
