@@ -24,7 +24,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { ServerOptions } from '@modelcontextprotocol/sdk/server/index.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
-import { Logger } from '@salesforce/core';
+import { Logger, Mutex } from '@salesforce/core';
 import { z, ZodRawShape } from 'zod';
 import { Telemetry } from './telemetry.js';
 import { RateLimiter, RateLimitConfig, createRateLimiter } from './utils/rate-limiter.js';
@@ -79,6 +79,10 @@ export class SfMcpServer extends McpServer implements ToolMethodSignatures {
 
   /** Default org alias when targetOrg is not provided */
   private defaultOrg: string | undefined;
+
+  // Serializes tool execution to prevent process.chdir() race conditions
+  // across concurrent calls (CWD is global process state).
+  private toolExecutionMutex = new Mutex();
 
   /**
    * Creates a new SfMcpServer instance
@@ -223,7 +227,7 @@ export class SfMcpServer extends McpServer implements ToolMethodSignatures {
       }
 
       const startTime = Date.now();
-      const result = await cb(args as unknown as InputArgs, extra);
+      const result = await this.toolExecutionMutex.lock(() => cb(args as unknown as InputArgs, extra));
       const runtimeMs = Date.now() - startTime;
 
       this.logger.debug(`Tool ${name} completed in ${runtimeMs}ms`);

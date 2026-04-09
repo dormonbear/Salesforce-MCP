@@ -186,4 +186,66 @@ describe('SfMcpServer middleware', () => {
       expect(cb.calledOnce).to.be.true;
     });
   });
+
+  describe('concurrent tool call serialization', () => {
+    it('should serialize concurrent tool calls so they do not interleave', async () => {
+      const executionOrder: string[] = [];
+
+      const cb = async (args: Record<string, unknown>) => {
+        const id = args.query as string;
+        executionOrder.push(`start-${id}`);
+        // Simulate async work (e.g. process.chdir + Salesforce API call)
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        executionOrder.push(`end-${id}`);
+        return { content: [{ type: 'text' as const, text: 'ok' }] };
+      };
+
+      const wrappedCb = captureWrappedCallback(
+        server,
+        'salesforce_query_records',
+        { query: z.string() },
+        cb,
+      );
+
+      // Fire two calls concurrently
+      await Promise.all([
+        wrappedCb({ targetOrg: 'staging', query: 'q1' }, {}),
+        wrappedCb({ targetOrg: 'staging', query: 'q2' }, {}),
+      ]);
+
+      // If serialized: start-q1, end-q1, start-q2, end-q2
+      // If interleaved: start-q1, start-q2, end-q1, end-q2  (or similar)
+      expect(executionOrder).to.have.lengthOf(4);
+      expect(executionOrder[0]).to.equal('start-q1');
+      expect(executionOrder[1]).to.equal('end-q1');
+      expect(executionOrder[2]).to.equal('start-q2');
+      expect(executionOrder[3]).to.equal('end-q2');
+    });
+
+    it('should preserve correct args for each concurrent call', async () => {
+      const capturedArgs: string[] = [];
+
+      const cb = async (args: Record<string, unknown>) => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        capturedArgs.push(args.usernameOrAlias as string);
+        return { content: [{ type: 'text' as const, text: 'ok' }] };
+      };
+
+      const wrappedCb = captureWrappedCallback(
+        server,
+        'salesforce_query_records',
+        { query: z.string() },
+        cb,
+      );
+
+      await Promise.all([
+        wrappedCb({ targetOrg: 'staging', query: 'q1' }, {}),
+        wrappedCb({ targetOrg: 'prod', query: 'q2' }, {}),
+      ]);
+
+      // Each call should receive its own correct org
+      expect(capturedArgs).to.include('staging');
+      expect(capturedArgs).to.include('prod');
+    });
+  });
 });
