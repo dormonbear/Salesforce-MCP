@@ -20,6 +20,7 @@ import { TOOLSETS } from '@salesforce/mcp-provider-api';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { Command, Flags, ux } from '@oclif/core';
 import Cache from './utils/cache.js';
+import { resolveSymbolicOrgs } from './utils/auth.js';
 import { Telemetry } from './telemetry.js';
 import { SfMcpServer } from './sf-mcp-server.js';
 import { registerToolsets } from './utils/registry-utils.js';
@@ -167,8 +168,14 @@ You can also use special values to control access to orgs:
       });
     }
 
-    await Cache.safeSet('allowedOrgs', new Set(flags.orgs));
-    this.logToStderr(`Allowed orgs:\n${flags.orgs.map((org) => `- ${org}`).join('\n')}`);
+    // Resolve symbolic org names (DEFAULT_TARGET_ORG, DEFAULT_TARGET_DEV_HUB) to actual
+    // usernames at startup. This eliminates per-call config reads that depend on
+    // process.cwd(), fixing the concurrent org race condition.
+    const resolvedOrgs = await resolveSymbolicOrgs(new Set(flags.orgs));
+    await Cache.safeSet('allowedOrgs', resolvedOrgs);
+    const resolvedOrgList = [...resolvedOrgs];
+
+    this.logToStderr(`Allowed orgs:\n${resolvedOrgList.map((org) => `- ${org}`).join('\n')}`);
     const orgPermissions = parseOrgPermissions(process.env.ORG_PERMISSIONS);
     if (orgPermissions.size > 0) {
       this.logToStderr(`Org permissions:\n${[...orgPermissions.entries()].map(([org, perm]) => `- ${org}: ${perm}`).join('\n')}`);
@@ -185,8 +192,8 @@ You can also use special values to control access to orgs:
       {
         telemetry: this.telemetry,
         orgPermissions,
-        authorizedOrgs: flags.orgs,
-        defaultOrg: flags.orgs[0],
+        authorizedOrgs: resolvedOrgList,
+        defaultOrg: resolvedOrgList[0],
       }
     );
 
