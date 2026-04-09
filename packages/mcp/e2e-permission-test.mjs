@@ -13,6 +13,12 @@ const ORG = 'dormon104@agentforce.com';
 const ORG2 = 'dormon@dormon.partner';
 const PROJECT_DIR = '/Users/dormon/Projects/Salesforce-MCP';
 
+// Known org identifiers for data-level isolation verification
+const ORG1_ID = '00Dfj00000F31rlEAB';
+const ORG1_INSTANCE = 'orgfarm-d300fcfc0f-dev-ed.develop.my.salesforce.com';
+const ORG2_ID = '00D5j000001jz4ZEAQ';
+const ORG2_INSTANCE = 'dormon2-dev-ed.my.salesforce.com';
+
 let passed = 0;
 let failed = 0;
 
@@ -476,6 +482,139 @@ async function testMultiOrgDefault() {
 }
 
 // ============================================================
+// Test Suite 14: Data-level org isolation (sequential)
+// Verify returned data actually comes from the targeted org,
+// not just that the middleware routed permissions correctly.
+// ============================================================
+async function testDataIsolationSequential() {
+  console.log('\n=== Test 14: Data-Level Org Isolation (Sequential) ===');
+  const BOTH_ORGS = `${ORG},${ORG2}`;
+  const { client } = await createClient({}, BOTH_ORGS);
+
+  try {
+    // Query ORG1 -> verify orgId belongs to ORG1
+    const r1 = await callTool(client, 'run_soql_query', {
+      query: "SELECT Id FROM Organization LIMIT 1",
+      usernameOrAlias: ORG,
+      directory: PROJECT_DIR,
+      targetOrg: ORG,
+    });
+    const r1Text = r1.content?.[0]?.text || '';
+    assert(!r1.isError, `data-seq: ORG1 SOQL succeeds`);
+    assert(r1Text.includes(ORG1_ID), `data-seq: ORG1 returned its own orgId (${ORG1_ID}). Got: ${r1Text.slice(0, 120)}`);
+
+    // Query ORG2 -> verify orgId belongs to ORG2
+    const r2 = await callTool(client, 'run_soql_query', {
+      query: "SELECT Id FROM Organization LIMIT 1",
+      usernameOrAlias: ORG2,
+      directory: PROJECT_DIR,
+      targetOrg: ORG2,
+    });
+    const r2Text = r2.content?.[0]?.text || '';
+    assert(!r2.isError, `data-seq: ORG2 SOQL succeeds`);
+    assert(r2Text.includes(ORG2_ID), `data-seq: ORG2 returned its own orgId (${ORG2_ID}). Got: ${r2Text.slice(0, 120)}`);
+
+    // Cross-check: ORG1 result must NOT contain ORG2's id
+    assert(!r1Text.includes(ORG2_ID), `data-seq: ORG1 result does NOT contain ORG2 orgId`);
+    // Cross-check: ORG2 result must NOT contain ORG1's id
+    assert(!r2Text.includes(ORG1_ID), `data-seq: ORG2 result does NOT contain ORG1 orgId`);
+  } finally {
+    await client.close();
+  }
+}
+
+// ============================================================
+// Test Suite 15: Data-level org isolation (concurrent)
+// The critical test: fire SOQL queries to both orgs at the
+// same time, verify each result matches its targeted org.
+// This catches process.chdir() race conditions and connection
+// object leaks between concurrent calls.
+// ============================================================
+async function testDataIsolationConcurrent() {
+  console.log('\n=== Test 15: Data-Level Org Isolation (Concurrent) ===');
+  const BOTH_ORGS = `${ORG},${ORG2}`;
+  const { client } = await createClient({}, BOTH_ORGS);
+
+  try {
+    // Fire identical SOQL to both orgs concurrently, multiple rounds
+    for (let round = 1; round <= 3; round++) {
+      const [r1, r2] = await Promise.all([
+        callTool(client, 'run_soql_query', {
+          query: "SELECT Id FROM Organization LIMIT 1",
+          usernameOrAlias: ORG,
+          directory: PROJECT_DIR,
+          targetOrg: ORG,
+        }),
+        callTool(client, 'run_soql_query', {
+          query: "SELECT Id FROM Organization LIMIT 1",
+          usernameOrAlias: ORG2,
+          directory: PROJECT_DIR,
+          targetOrg: ORG2,
+        }),
+      ]);
+
+      const r1Text = r1.content?.[0]?.text || '';
+      const r2Text = r2.content?.[0]?.text || '';
+
+      assert(
+        !r1.isError && r1Text.includes(ORG1_ID),
+        `data-concurrent round ${round}: ORG1 query returned ORG1 data (${ORG1_ID})`
+      );
+      assert(
+        !r2.isError && r2Text.includes(ORG2_ID),
+        `data-concurrent round ${round}: ORG2 query returned ORG2 data (${ORG2_ID})`
+      );
+      // Cross-contamination check
+      assert(
+        !r1Text.includes(ORG2_ID),
+        `data-concurrent round ${round}: ORG1 result NOT contaminated with ORG2`
+      );
+      assert(
+        !r2Text.includes(ORG1_ID),
+        `data-concurrent round ${round}: ORG2 result NOT contaminated with ORG1`
+      );
+    }
+  } finally {
+    await client.close();
+  }
+}
+
+// ============================================================
+// Test Suite 16: Data isolation under interleaved access pattern
+// Alternating org targets: ORG1, ORG2, ORG1, ORG2
+// Catches bugs where a cached connection from the previous
+// call leaks into the next call.
+// ============================================================
+async function testDataIsolationInterleaved() {
+  console.log('\n=== Test 16: Data-Level Org Isolation (Interleaved) ===');
+  const BOTH_ORGS = `${ORG},${ORG2}`;
+  const { client } = await createClient({}, BOTH_ORGS);
+
+  try {
+    const sequence = [ORG, ORG2, ORG, ORG2, ORG];
+    const expectedIds = [ORG1_ID, ORG2_ID, ORG1_ID, ORG2_ID, ORG1_ID];
+
+    for (let i = 0; i < sequence.length; i++) {
+      const target = sequence[i];
+      const expectedId = expectedIds[i];
+      const result = await callTool(client, 'run_soql_query', {
+        query: "SELECT Id FROM Organization LIMIT 1",
+        usernameOrAlias: target,
+        directory: PROJECT_DIR,
+        targetOrg: target,
+      });
+      const text = result.content?.[0]?.text || '';
+      assert(
+        !result.isError && text.includes(expectedId),
+        `interleaved step ${i + 1} (${target}): got correct orgId (${expectedId})`
+      );
+    }
+  } finally {
+    await client.close();
+  }
+}
+
+// ============================================================
 // Run all tests
 // ============================================================
 async function main() {
@@ -497,6 +636,9 @@ async function main() {
     await testMultiOrgConcurrentIsolation();
     await testMultiOrgApprovalIsolation();
     await testMultiOrgDefault();
+    await testDataIsolationSequential();
+    await testDataIsolationConcurrent();
+    await testDataIsolationInterleaved();
   } catch (err) {
     console.error('\nFATAL ERROR:', err.message);
     console.error(err.stack);
