@@ -8,16 +8,17 @@ A Model Context Protocol (MCP) server that exposes Salesforce CLI capabilities a
 
 AI agents can safely and efficiently interact with Salesforce orgs through well-defined, permission-controlled MCP tools.
 
-## Current Milestone: v1.1 Eliminate process.chdir() and Enable Tool Parallelism
+## Current Milestone: v1.2 MCP Best Practices Alignment
 
-**Goal:** Remove process.chdir() dependency from all tools, eliminate global Mutex serialization, and unlock parallel tool execution.
+**Goal:** Align with 2025-2026 MCP best practices — improve tool metadata, error recovery, structured output, discoverability, and observability.
 
 **Target features:**
-- Eliminate process.chdir() calls from 14 tools (three waves)
-- Remove global toolExecutionMutex, enable tool parallelism
-- Fix SIGTERM handler bug (process.stdin → process)
-- Complete tool-categories.ts with missing tool classifications
-- Consolidate directoryParam/sanitizePath to mcp-provider-api
+- Complete Tool Annotations for all tools (readOnlyHint/destructiveHint/idempotentHint/openWorldHint)
+- Error messages with recovery guidance for LLM self-repair
+- Structured Output (structuredContent) for core tools
+- MCP Resources for org info, permissions, and connection status
+- MCP Prompts for common Salesforce operations
+- Protocol-level logging (logging/setLevel) and telemetry error visibility
 
 ## Requirements
 
@@ -25,30 +26,39 @@ AI agents can safely and efficiently interact with Salesforce orgs through well-
 
 - Startup org resolution — resolve symbolic org names once at startup (v1.0 Phase 1)
 - Simplified getConnection — skip redundant per-call config reads (v1.0 Phase 1)
+- Eliminated process.chdir() from all 14 tools (v1.1 Phase 3-4)
+- Removed global Mutex, enabled parallel execution (v1.1 Phase 5)
+- Fixed SIGTERM handler bug (v1.1 Phase 2)
+- Completed tool-categories.ts (v1.1 Phase 2)
+- Consolidated shared params to mcp-provider-api (v1.1 Phase 2)
 
 ### Active
 
-- [ ] Eliminate process.chdir() from all 14 tools
-- [ ] Remove global Mutex, enable parallel execution
-- [ ] Fix SIGTERM handler bug
-- [ ] Complete tool-categories.ts
-- [ ] Consolidate shared params to mcp-provider-api
+- [ ] Complete Tool Annotations for all tools
+- [ ] Error messages with recovery guidance
+- [ ] Structured Output (structuredContent) for core tools
+- [ ] MCP Resources for org info and permissions
+- [ ] MCP Prompts for common operations
+- [ ] Protocol-level logging and telemetry visibility
 
 ### Out of Scope
 
 - Streamable HTTP transport — not needed for current single-client stdio use case
-- MCP Resources/Prompts implementation — valuable but separate initiative
 - Tasks primitive adoption — depends on SDK support maturity
 - External provider modifications (lwc-experts, aura-experts) — closed source
+- Tool consolidation (merging 49+ tools) — requires upstream coordination
+- SDK v2.0 upgrade — still in alpha, wait for stable release
 
 ## Context
 
 - Monorepo with 10 packages (Yarn workspaces, nohoist)
 - MCP SDK: `@modelcontextprotocol/sdk` ^1.18.0
 - Salesforce core: `@salesforce/core` ^8.24.3
-- 14 tools call `process.chdir()`, forcing all 49 tools through a single Mutex
-- Phase 1 (v1.0) resolved org names at startup, removing the primary reason many tools needed CWD-dependent config reads
-- `@salesforce/core` APIs (SfProject, SourceTracking) still use `process.cwd()` in some paths — need per-tool verification
+- v1.0 resolved org names at startup; v1.1 eliminated all process.chdir() and enabled parallel execution
+- 3 tools have empty annotations; multiple tools missing destructiveHint/idempotentHint
+- All tools return plain text only, no structuredContent
+- No MCP Resources or Prompts registered
+- Telemetry has silent empty catch blocks; no MCP logging/setLevel support
 
 ## Constraints
 
@@ -82,4 +92,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-11 after milestone v1.1 initialization*
+*Last updated: 2026-04-11 after milestone v1.2 initialization*
