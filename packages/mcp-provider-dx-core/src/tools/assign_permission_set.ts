@@ -61,9 +61,14 @@ Set the permission set MyPermSet on behalf of my-alias.`),
   directory: directoryParam,
 });
 
+const assignPermSetOutputSchema = z.object({
+  permissionSetName: z.string(),
+  assignedTo: z.string(),
+});
+
 type InputArgs = z.infer<typeof assignPermissionSetParamsSchema>;
 type InputArgsShape = typeof assignPermissionSetParamsSchema.shape;
-type OutputArgsShape = z.ZodRawShape;
+type OutputArgsShape = typeof assignPermSetOutputSchema.shape;
 
 export class AssignPermissionSetMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
   public constructor(private readonly services: Services) {
@@ -87,7 +92,7 @@ export class AssignPermissionSetMcpTool extends McpTool<InputArgsShape, OutputAr
       title: 'Assign Permission Set',
       description: 'Assign a permission set to one or more org users.',
       inputSchema: assignPermissionSetParamsSchema.shape,
-      outputSchema: undefined,
+      outputSchema: assignPermSetOutputSchema.shape,
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -127,7 +132,10 @@ export class AssignPermissionSetMcpTool extends McpTool<InputArgsShape, OutputAr
 
       await user.assignPermissionSets(queryResult.Id, [input.permissionSetName]);
 
-      return textResponse(`Assigned ${input.permissionSetName} to ${assignTo}`);
+      return {
+        content: [{ type: 'text' as const, text: `Assigned ${input.permissionSetName} to ${assignTo}` }],
+        structuredContent: { permissionSetName: input.permissionSetName, assignedTo: assignTo },
+      };
     } catch (error) {
       const err = SfError.wrap(error);
 

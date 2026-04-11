@@ -50,9 +50,17 @@ const runAgentTestsParam = z.object({
     .describe('Whether to wait for the tests to finish (false) or quickly return only the test id (true)'),
 });
 
+const agentTestOutputSchema = z.object({
+  runId: z.string().optional(),
+  status: z.string().optional(),
+  startTime: z.string().optional(),
+  endTime: z.string().optional(),
+  testCases: z.array(z.record(z.unknown())).optional(),
+});
+
 type InputArgs = z.infer<typeof runAgentTestsParam>;
 type InputArgsShape = typeof runAgentTestsParam.shape;
-type OutputArgsShape = z.ZodRawShape;
+type OutputArgsShape = typeof agentTestOutputSchema.shape;
 
 export class TestAgentsMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
   public constructor(private readonly services: Services) {
@@ -87,7 +95,7 @@ Run tests for the X agent
 Run this test
 start myAgentTest and don't wait for results`,
       inputSchema: runAgentTestsParam.shape,
-      outputSchema: undefined,
+      outputSchema: agentTestOutputSchema.shape,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -111,11 +119,17 @@ start myAgentTest and don't wait for results`,
 
       if (input.async) {
         const startResult = await agentTester.start(input.agentApiName);
-        return textResponse(`Test Run: ${JSON.stringify(startResult)}`);
+        return {
+          content: [{ type: 'text' as const, text: `Test Run: ${JSON.stringify(startResult)}` }],
+          structuredContent: startResult as Record<string, unknown>,
+        };
       } else {
         const test = await agentTester.start(input.agentApiName);
         const result = await agentTester.poll(test.runId, { timeout: Duration.minutes(10) });
-        return textResponse(`Test result: ${JSON.stringify(result)}`);
+        return {
+          content: [{ type: 'text' as const, text: `Test result: ${JSON.stringify(result)}` }],
+          structuredContent: result as Record<string, unknown>,
+        };
       }
     } catch (e) {
       const err = SfError.wrap(e);

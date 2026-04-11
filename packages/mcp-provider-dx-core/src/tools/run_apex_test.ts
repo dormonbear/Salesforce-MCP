@@ -84,9 +84,25 @@ RunSpecifiedTests="Run the Apex tests I specify, these will be specified in the 
   directory: directoryParam,
 });
 
+const apexTestOutputSchema = z.object({
+  testRunId: z.string().optional(),
+  summary: z.object({
+    outcome: z.string().optional(),
+    testsRan: z.number().optional(),
+    passing: z.number().optional(),
+    failing: z.number().optional(),
+    skipped: z.number().optional(),
+    passRate: z.string().optional(),
+    failRate: z.string().optional(),
+    testExecutionTimeInMs: z.number().optional(),
+    orgId: z.string().optional(),
+  }).optional(),
+  tests: z.array(z.record(z.unknown())).optional(),
+});
+
 type InputArgs = z.infer<typeof runApexTestsParam>;
 type InputArgsShape = typeof runApexTestsParam.shape;
-type OutputArgsShape = z.ZodRawShape;
+type OutputArgsShape = typeof apexTestOutputSchema.shape;
 
 export class TestApexMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
   public constructor(private readonly services: Services) {
@@ -125,7 +141,7 @@ Test the "mySuite" suite asynchronously. I’ll check results later.
 Run tests for this file and include coverage
 What are the results for 707XXXXXXXXXXXX`,
       inputSchema: runApexTestsParam.shape,
-      outputSchema: undefined,
+      outputSchema: apexTestOutputSchema.shape,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -176,7 +192,11 @@ What are the results for 707XXXXXXXXXXXX`,
           Duration.minutes(10),
         );
         if (input.async) {
-          return textResponse(`Test Run Id: ${JSON.stringify(result)}`);
+          const asyncResult = result as TestRunIdResult;
+          return {
+            content: [{ type: 'text' as const, text: `Test Run Id: ${JSON.stringify(result)}` }],
+            structuredContent: { testRunId: asyncResult.testRunId },
+          };
         }
         // the user waited for the full results, we know they're TestResult
         result = result as TestResult;
@@ -187,7 +207,24 @@ What are the results for 707XXXXXXXXXXXX`,
         result.tests = result.tests.filter((test) => test.outcome === ApexTestResultOutcome.Fail);
       }
 
-      return textResponse(`Test result: ${JSON.stringify(result)}`);
+      return {
+        content: [{ type: 'text' as const, text: `Test result: ${JSON.stringify(result)}` }],
+        structuredContent: {
+          testRunId: result.summary?.testRunId,
+          summary: result.summary ? {
+            outcome: result.summary.outcome,
+            testsRan: result.summary.testsRan,
+            passing: result.summary.passing,
+            failing: result.summary.failing,
+            skipped: result.summary.skipped,
+            passRate: result.summary.passRate,
+            failRate: result.summary.failRate,
+            testExecutionTimeInMs: result.summary.testExecutionTimeInMs,
+            orgId: result.summary.orgId,
+          } : undefined,
+          tests: result.tests as Record<string, unknown>[],
+        },
+      };
     } catch (e) {
       const err = SfError.wrap(e);
       const recovery = err.actions?.join(' ')
