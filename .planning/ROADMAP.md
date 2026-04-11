@@ -95,7 +95,7 @@ Plans:
 
 **Milestone Goal:** Align with 2025-2026 MCP best practices — complete tool annotations, error recovery guidance, structured output for core tools, and MCP Resources for org discoverability.
 
-- [ ] **Phase 6: Tool Annotations** - Complete all 4 annotation hints on every GA tool
+- [x] **Phase 6: Tool Annotations** - Complete all 4 annotation hints on every GA tool
 - [ ] **Phase 7: Error Recovery** - Add recovery guidance to top-10 most-used GA tool error messages
 - [ ] **Phase 8: Structured Output** - Middleware pass-through test then outputSchema + structuredContent on 5-8 core tools
 - [ ] **Phase 9: MCP Resources** - Wire provideResources() and implement org list + permissions resources
@@ -117,7 +117,7 @@ Plans:
 Plans:
 - [x] 06-01-PLAN.md — Complete 4-hint annotations on all dx-core GA tools (Wave 1)
 - [x] 06-02-PLAN.md — Complete 4-hint annotations on mobile-web, code-analyzer, devops, scale-products, and mcp GA tools; fix 2 readOnlyHint bugs (Wave 1)
-- [ ] 06-03-PLAN.md — Write readOnlyHint consistency unit test against tool-categories.ts (Wave 2)
+- [x] 06-03-PLAN.md — Write readOnlyHint consistency unit test against tool-categories.ts (Wave 2)
 
 ### Phase 7: Error Recovery
 
@@ -167,7 +167,7 @@ Plans:
 | 3. Wave 1 chdir Removal | v1.1 | 1/1 | Complete | 2026-04-11 |
 | 4. Wave 2 chdir Removal | v1.1 | 1/1 | Complete | 2026-04-11 |
 | 5. Concurrency Enablement | v1.1 | 1/1 | Complete | 2026-04-11 |
-| 6. Tool Annotations | v1.2 | 2/3 | In Progress|  |
+| 6. Tool Annotations | v1.2 | 3/3 | Complete | 2026-04-11 |
 | 7. Error Recovery | v1.2 | 0/TBD | Not started | - |
 | 8. Structured Output | v1.2 | 0/TBD | Not started | - |
 | 9. MCP Resources | v1.2 | 0/TBD | Not started | - |
