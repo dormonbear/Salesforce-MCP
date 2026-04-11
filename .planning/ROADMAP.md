@@ -3,7 +3,7 @@
 ## Milestones
 
 - ✅ **v1.0 Fix Concurrent Org Race Condition** - Phase 1 (shipped 2026-04-09)
-- 🚧 **v1.1 Eliminate process.chdir() and Enable Tool Parallelism** - Phases 2-5 (in progress)
+- ✅ **v1.1 Eliminate process.chdir() and Enable Tool Parallelism** - Phases 2-5 (shipped 2026-04-11)
 
 ## Phases
 
@@ -91,7 +91,10 @@ Plans:
   3. lwc-experts tools serialize through a targeted per-tool Mutex while all other tools run concurrently
   4. A concurrent stress test of 5 or more tools executing in parallel completes without race conditions or data corruption
   5. All existing tests pass after Mutex removal
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [x] 05-01-PLAN.md — Remove global Mutex, add targeted lwc-experts serialization, concurrent stress test
 
 ## Progress
 
@@ -103,4 +106,4 @@ Plans:
 | 2. Prerequisites | v1.1 | 2/2 | Complete | 2026-04-11 |
 | 3. Wave 1 chdir Removal | v1.1 | 1/1 | Complete | 2026-04-11 |
 | 4. Wave 2 chdir Removal | v1.1 | 1/1 | Complete | 2026-04-11 |
-| 5. Concurrency Enablement | v1.1 | 0/TBD | Not started | - |
+| 5. Concurrency Enablement | v1.1 | 1/1 | Complete | 2026-04-11 |
