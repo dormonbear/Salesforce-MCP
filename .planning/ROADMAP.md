@@ -132,8 +132,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 07-01-PLAN.md — Create toolError() factory and classifyError() in mcp-provider-api with TDD (Wave 1)
-- [ ] 07-02-PLAN.md — Migrate all 10 top-used GA tools to toolError() with domain-specific recovery hints (Wave 2)
+- [x] 07-01-PLAN.md — Create toolError() factory and classifyError() in mcp-provider-api with TDD (Wave 1)
+- [x] 07-02-PLAN.md — Migrate all 10 top-used GA tools to toolError() with domain-specific recovery hints (Wave 2)
 
 ### Phase 8: Structured Output
 
@@ -172,6 +172,6 @@ Plans:
 | 4. Wave 2 chdir Removal | v1.1 | 1/1 | Complete | 2026-04-11 |
 | 5. Concurrency Enablement | v1.1 | 1/1 | Complete | 2026-04-11 |
 | 6. Tool Annotations | v1.2 | 3/3 | Complete | 2026-04-11 |
-| 7. Error Recovery | v1.2 | 0/2 | In progress | - |
+| 7. Error Recovery | v1.2 | 2/2 | Complete | 2026-04-11 |
 | 8. Structured Output | v1.2 | 0/TBD | Not started | - |
 | 9. MCP Resources | v1.2 | 0/TBD | Not started | - |

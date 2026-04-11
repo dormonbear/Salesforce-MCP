@@ -18,7 +18,7 @@ Requirements for aligning with MCP best practices (2025-2026). Scope limited to 
 
 ### Error Experience
 
-- [ ] **ERR-01**: Top-10 most-used GA tools return error messages with recovery guidance (what went wrong + what to try next)
+- [x] **ERR-01**: Top-10 most-used GA tools return error messages with recovery guidance (what went wrong + what to try next)
 
 ### Structured Output
 
@@ -65,7 +65,7 @@ Deferred to future milestones.
 |-------------|-------|--------|
 | META-01 | Phase 6 | Complete |
 | META-02 | Phase 6 | Complete |
-| ERR-01 | Phase 7 | Pending |
+| ERR-01 | Phase 7 | Complete |
 | OUT-02 | Phase 8 | Pending |
 | OUT-01 | Phase 8 | Pending |
 | DISC-03 | Phase 9 | Pending |
