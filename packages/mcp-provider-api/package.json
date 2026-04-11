@@ -17,10 +17,12 @@
   "devDependencies": {
     "@eslint/js": "^9.35.0",
     "@types/node": "^22.16.5",
+    "@vitest/coverage-istanbul": "^3.2.4",
     "eslint": "^9.35.0",
     "rimraf": "^6.0.1",
     "typescript": "^5.9.2",
-    "typescript-eslint": "^8.44.0"
+    "typescript-eslint": "^8.44.0",
+    "vitest": "^3.2.4"
   },
   "files": [
     "dist",
@@ -28,13 +30,13 @@
     "package.json"
   ],
   "scripts": {
-    "build": "tsc --build tsconfig.json --verbose",
-    "clean": "tsc --build tsconfig.json --clean",
+    "build": "tsc --build tsconfig.build.json --verbose",
+    "clean": "tsc --build tsconfig.build.json --clean",
     "clean-all": "yarn clean && rimraf node_modules",
     "format": "prettier --write .",
     "lint": "echo 'no lint script available yet'",
     "postclean": "rimraf dist && rimraf ./*.tgz",
     "package": "yarn pack",
-    "test": "echo 'No unit tests are needed for this api module'"
+    "test": "tsc --build tsconfig.json --noEmit && vitest run --coverage"
   }
 }
