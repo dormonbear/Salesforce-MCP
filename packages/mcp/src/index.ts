@@ -160,12 +160,6 @@ You can also use special values to control access to orgs:
         this.telemetry?.stop();
       });
       
-      // Handle SIGTERM as a fallback to ensure telemetry is sent
-      // https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle#stdio
-      process.stdin.on('SIGTERM', () => {
-        this.telemetry?.sendEvent('SERVER_STOPPED_SUCCESS');
-        this.telemetry?.stop();
-      });
     }
 
     // Resolve symbolic org names (DEFAULT_TARGET_ORG, DEFAULT_TARGET_DEV_HUB) to actual
@@ -219,7 +213,16 @@ You can also use special values to control access to orgs:
 
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    
+
+    // Handle SIGTERM for graceful shutdown
+    // https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle#stdio
+    process.on('SIGTERM', () => {
+      this.telemetry?.sendEvent('SERVER_STOPPED_SUCCESS');
+      this.telemetry?.stop();
+      server.close();
+      setTimeout(() => process.exit(0), 5000);
+    });
+
     console.error(`✅ Salesforce MCP Server v${this.config.version} running on stdio`);
   }
 
