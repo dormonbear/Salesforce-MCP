@@ -36,9 +36,22 @@ export const listAllOrgsParamsSchema = z.object({
   directory: directoryParam,
 });
 
+const listOrgsOutputSchema = z.object({
+  orgs: z.array(z.object({
+    username: z.string().optional(),
+    aliases: z.array(z.string()).nullable().optional(),
+    instanceUrl: z.string().optional(),
+    orgId: z.string().optional(),
+    isScratchOrg: z.boolean().optional(),
+    isDevHub: z.boolean().optional(),
+    isSandbox: z.boolean().optional(),
+    isExpired: z.union([z.boolean(), z.literal('unknown')]).optional(),
+  })),
+});
+
 type InputArgs = z.infer<typeof listAllOrgsParamsSchema>;
 type InputArgsShape = typeof listAllOrgsParamsSchema.shape;
-type OutputArgsShape = z.ZodRawShape;
+type OutputArgsShape = typeof listOrgsOutputSchema.shape;
 
 export class ListAllOrgsMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
   public constructor(private readonly services: Services) {
@@ -70,7 +83,7 @@ Can you list all Salesforce orgs for me
 List all Salesforce orgs
 List all orgs`,
       inputSchema: listAllOrgsParamsSchema.shape,
-      outputSchema: undefined,
+      outputSchema: listOrgsOutputSchema.shape,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -83,7 +96,10 @@ List all orgs`,
   public async exec(_input: InputArgs): Promise<CallToolResult> {
     try {
       const orgs = await this.services.getOrgService().getAllowedOrgs();
-      return textResponse(`List of configured Salesforce orgs:\n\n${JSON.stringify(orgs, null, 2)}`);
+      return {
+        content: [{ type: 'text' as const, text: `List of configured Salesforce orgs:\n\n${JSON.stringify(orgs, null, 2)}` }],
+        structuredContent: { orgs },
+      };
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       return toolError(`Failed to list orgs: ${err.message}`, {

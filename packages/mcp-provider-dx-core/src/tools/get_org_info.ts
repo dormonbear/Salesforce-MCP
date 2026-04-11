@@ -14,11 +14,24 @@
  * limitations under the License.
  */
 
+import { z } from 'zod';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { McpTool, McpToolConfig, ReleaseState, Services, Toolset, toolError, classifyError } from '@salesforce/mcp-provider-api';
 import { textResponse } from '../shared/utils.js';
 
-export class GetOrgInfoMcpTool extends McpTool<Record<string, never>> {
+const getOrgInfoOutputSchema = z.object({
+  defaultOrg: z.string(),
+  authorizedOrgs: z.array(z.object({
+    alias: z.string(),
+    username: z.string(),
+    instanceUrl: z.string(),
+    orgId: z.string(),
+  })),
+});
+
+type OutputArgsShape = typeof getOrgInfoOutputSchema.shape;
+
+export class GetOrgInfoMcpTool extends McpTool<Record<string, never>, OutputArgsShape> {
   private services: Services;
 
   public constructor(services: Services) {
@@ -38,14 +51,14 @@ export class GetOrgInfoMcpTool extends McpTool<Record<string, never>> {
     return 'salesforce_get_org_info';
   }
 
-  public getConfig(): McpToolConfig<Record<string, never>> {
+  public getConfig(): McpToolConfig<Record<string, never>, OutputArgsShape> {
     return {
       title: 'Get Org Info',
       description:
         'Returns a list of all authorized Salesforce orgs, their aliases, usernames, instance URLs, and permission levels. ' +
         'Use this tool to discover which orgs are available before performing operations.',
       inputSchema: {} as Record<string, never>,
-      outputSchema: undefined,
+      outputSchema: getOrgInfoOutputSchema.shape,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -73,7 +86,10 @@ export class GetOrgInfoMcpTool extends McpTool<Record<string, never>> {
         authorizedOrgs: orgList,
       };
 
-      return textResponse(JSON.stringify(result, null, 2));
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
+      };
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       return toolError(`Failed to retrieve org info: ${err.message}`, {

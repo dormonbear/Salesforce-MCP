@@ -41,9 +41,15 @@ export const queryOrgParamsSchema = z.object({
   useToolingApi: useToolingApiParam,
 });
 
+const queryOutputSchema = z.object({
+  totalSize: z.number(),
+  done: z.boolean(),
+  records: z.array(z.record(z.unknown())),
+});
+
 type InputArgs = z.infer<typeof queryOrgParamsSchema>;
 type InputArgsShape = typeof queryOrgParamsSchema.shape;
-type OutputArgsShape = z.ZodRawShape;
+type OutputArgsShape = typeof queryOutputSchema.shape;
 
 export class QueryOrgMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
   public constructor(private readonly services: Services) {
@@ -67,7 +73,7 @@ export class QueryOrgMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
       title: 'Query Org',
       description: 'Run a SOQL query against a Salesforce org.',
       inputSchema: queryOrgParamsSchema.shape,
-      outputSchema: undefined,
+      outputSchema: queryOutputSchema.shape,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -89,7 +95,11 @@ export class QueryOrgMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
         ? await connection.tooling.query(input.query)
         : await connection.query(input.query);
 
-      return textResponse(`SOQL query results:\n\n${JSON.stringify(result, null, 2)}`);
+      const structured = { totalSize: result.totalSize, done: result.done, records: result.records };
+      return {
+        content: [{ type: 'text' as const, text: `SOQL query results:\n\n${JSON.stringify(result, null, 2)}` }],
+        structuredContent: structured,
+      };
     } catch (error) {
       const sfErr = SfError.wrap(error);
 
