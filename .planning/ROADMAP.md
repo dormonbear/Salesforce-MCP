@@ -112,7 +112,12 @@ Plans:
   2. A unit test verifies that each tool's readOnlyHint value matches its tool-categories.ts read/write/execute classification
   3. No tool that is classified as "read" in tool-categories.ts has readOnlyHint set to false
   4. No tool that is classified as "write" or "execute" in tool-categories.ts has readOnlyHint set to true
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 06-01-PLAN.md — Complete 4-hint annotations on all dx-core GA tools (Wave 1)
+- [ ] 06-02-PLAN.md — Complete 4-hint annotations on mobile-web, code-analyzer, devops, scale-products, and mcp GA tools; fix 2 readOnlyHint bugs (Wave 1)
+- [ ] 06-03-PLAN.md — Write readOnlyHint consistency unit test against tool-categories.ts (Wave 2)
 
 ### Phase 7: Error Recovery
 
@@ -162,7 +167,7 @@ Plans:
 | 3. Wave 1 chdir Removal | v1.1 | 1/1 | Complete | 2026-04-11 |
 | 4. Wave 2 chdir Removal | v1.1 | 1/1 | Complete | 2026-04-11 |
 | 5. Concurrency Enablement | v1.1 | 1/1 | Complete | 2026-04-11 |
-| 6. Tool Annotations | v1.2 | 0/TBD | Not started | - |
+| 6. Tool Annotations | v1.2 | 0/3 | Not started | - |
 | 7. Error Recovery | v1.2 | 0/TBD | Not started | - |
 | 8. Structured Output | v1.2 | 0/TBD | Not started | - |
 | 9. MCP Resources | v1.2 | 0/TBD | Not started | - |
