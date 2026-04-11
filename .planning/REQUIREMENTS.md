@@ -27,9 +27,9 @@ Requirements for aligning with MCP best practices (2025-2026). Scope limited to 
 
 ### Discoverability
 
-- [ ] **DISC-01**: MCP Resources expose authenticated org list as a discoverable resource
-- [ ] **DISC-02**: MCP Resources expose per-org permission levels as a discoverable resource
-- [ ] **DISC-03**: `registry-utils.ts` wires `provideResources()` from providers to `server.registerResource()`
+- [x] **DISC-01**: MCP Resources expose authenticated org list as a discoverable resource
+- [x] **DISC-02**: MCP Resources expose per-org permission levels as a discoverable resource
+- [x] **DISC-03**: `registry-utils.ts` wires `provideResources()` from providers to `server.registerResource()`
 
 ## Future Requirements
 
@@ -68,9 +68,9 @@ Deferred to future milestones.
 | ERR-01 | Phase 7 | Complete |
 | OUT-02 | Phase 8 | Complete |
 | OUT-01 | Phase 8 | Complete |
-| DISC-03 | Phase 9 | Pending |
-| DISC-01 | Phase 9 | Pending |
-| DISC-02 | Phase 9 | Pending |
+| DISC-03 | Phase 9 | Complete |
+| DISC-01 | Phase 9 | Complete |
+| DISC-02 | Phase 9 | Complete |
 
 **Coverage:**
 - v1.2 requirements: 8 total

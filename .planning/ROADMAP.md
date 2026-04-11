@@ -164,8 +164,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 09-01-PLAN.md — Wire registerResourcesFromProviders() infrastructure and PermissionService on Services
-- [ ] 09-02-PLAN.md — Implement OrgListResource and OrgPermissionsResource in mcp-provider-dx-core
+- [x] 09-01-PLAN.md — Wire registerResourcesFromProviders() infrastructure and PermissionService on Services
+- [x] 09-02-PLAN.md — Implement OrgListResource and OrgPermissionsResource in mcp-provider-dx-core
 
 ## Progress
 
@@ -181,4 +181,4 @@ Plans:
 | 6. Tool Annotations | v1.2 | 3/3 | Complete | 2026-04-11 |
 | 7. Error Recovery | v1.2 | 2/2 | Complete | 2026-04-11 |
 | 8. Structured Output | v1.2 | 2/2 | Complete | 2026-04-11 |
-| 9. MCP Resources | v1.2 | 0/2 | Not started | - |
+| 9. MCP Resources | v1.2 | 2/2 | Complete | 2026-04-11 |
