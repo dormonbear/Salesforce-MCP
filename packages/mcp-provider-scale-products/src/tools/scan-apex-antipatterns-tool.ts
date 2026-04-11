@@ -137,8 +137,6 @@ Requires an absolute path to the Apex class file.
   }
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
-    process.chdir(input.directory);
-    
     const orgInfo = await this.resolveOrgConnection(input.usernameOrAlias);
     
     this.scaleTelemetryService.emitToolInvocation(

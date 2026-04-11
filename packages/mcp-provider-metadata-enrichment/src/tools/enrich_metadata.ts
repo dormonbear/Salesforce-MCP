@@ -153,7 +153,6 @@ export class EnrichMetadataMcpTool extends McpTool<InputArgsShape, OutputArgsSha
         };
       }
   
-      process.chdir(input.directory);
       const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
       const project = await SfProject.resolve(input.directory);
   

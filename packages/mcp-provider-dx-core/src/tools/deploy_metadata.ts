@@ -142,9 +142,6 @@ Deploy X to my org and run A,B and C apex tests.`,
         true,
       );
 
-    // needed for org allowlist to work
-    process.chdir(input.directory);
-
     const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
     const project = await SfProject.resolve(input.directory);
 

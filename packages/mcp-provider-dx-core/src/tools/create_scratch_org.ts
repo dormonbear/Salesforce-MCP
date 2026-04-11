@@ -130,9 +130,7 @@ create a scratch org aliased as MyNewOrg and set as default and don't wait for i
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
     try {
-      process.chdir(input.directory);
-
-      // NOTE: 
+      // NOTE:
       // this should be:
       // ```ts
       // const connection = await this.services.getOrgService().getConnection(input.devHub);
