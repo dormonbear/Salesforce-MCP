@@ -6,7 +6,7 @@ import { fetchWorkItemByName } from "../getWorkItems.js";
 import { fetchWorkItemByNameMP } from "../getWorkItemsMP.js";
 import { isManagedPackageDevopsOrg } from "../shared/orgType.js";
 import { normalizeAndValidateRepoPath } from "../shared/pathUtils.js";
-import { usernameOrAliasParam } from "../shared/params.js";
+import { usernameOrAliasParam } from "@salesforce/mcp-provider-api";
 
 const inputSchema = z.object({
   usernameOrAlias: usernameOrAliasParam,

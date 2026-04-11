@@ -27,7 +27,7 @@ import {
 import { ScaleTelemetryService } from "../services/scale-telemetry-service.js";
 import { SOQLRuntimeEnricher } from "../runtime-enrichers/soql-runtime-enricher.js";
 import { MethodRuntimeEnricher } from "../runtime-enrichers/method-runtime-enricher.js";
-import { directoryParam, usernameOrAliasParam } from "../shared/params.js";
+import { directoryParam, usernameOrAliasParam } from "@salesforce/mcp-provider-api";
 
 /** Runtime API endpoint base path (API version will be dynamically inserted) */
 const RUNTIME_API_BASE_PATH = "/services/data/{version}/scalemcp/apexguru/class-runtime-data";

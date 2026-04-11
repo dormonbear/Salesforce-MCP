@@ -4,7 +4,7 @@ import { McpTool, McpToolConfig, ReleaseState, Toolset, Services } from "@salesf
 import { promoteWorkItems } from "../promoteWorkItems.js";
 import { fetchWorkItemsByNames } from "../getWorkItems.js";
 import { TelemetryEventNames } from "../constants.js";
-import { usernameOrAliasParam } from "../shared/params.js";
+import { usernameOrAliasParam } from "@salesforce/mcp-provider-api";
 
 const inputSchema = z.object({
   usernameOrAlias: usernameOrAliasParam,
