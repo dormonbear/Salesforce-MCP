@@ -4,6 +4,7 @@
 
 - ✅ **v1.0 Fix Concurrent Org Race Condition** - Phase 1 (shipped 2026-04-09)
 - ✅ **v1.1 Eliminate process.chdir() and Enable Tool Parallelism** - Phases 2-5 (shipped 2026-04-11)
+- 🚧 **v1.2 MCP Best Practices Alignment** - Phases 6-9 (in progress)
 
 ## Phases
 
@@ -23,16 +24,8 @@
 
 </details>
 
-### 🚧 v1.1 Eliminate process.chdir() and Enable Tool Parallelism (In Progress)
-
-**Milestone Goal:** Remove process.chdir() from all 14 open-source tools, fix ancillary bugs, and unlock parallel tool execution by eliminating the global Mutex.
-
-- [ ] **Phase 2: Prerequisites** - Consolidate shared params, fix SIGTERM bug, complete tool categories
-- [ ] **Phase 3: Wave 1 chdir Removal** - Remove chdir from 10 connection-only tools
-- [ ] **Phase 4: Wave 2 chdir Removal** - Remove chdir from 4 SfProject-dependent tools
-- [ ] **Phase 5: Concurrency Enablement** - Fix auth.ts CWD dependency, remove global Mutex, add targeted lock
-
-## Phase Details
+<details>
+<summary>✅ v1.1 Eliminate process.chdir() and Enable Tool Parallelism (Phases 2-5) — SHIPPED 2026-04-11</summary>
 
 ### Phase 2: Prerequisites
 
@@ -96,9 +89,71 @@ Plans:
 Plans:
 - [x] 05-01-PLAN.md — Remove global Mutex, add targeted lwc-experts serialization, concurrent stress test
 
+</details>
+
+### 🚧 v1.2 MCP Best Practices Alignment (In Progress)
+
+**Milestone Goal:** Align with 2025-2026 MCP best practices — complete tool annotations, error recovery guidance, structured output for core tools, and MCP Resources for org discoverability.
+
+- [ ] **Phase 6: Tool Annotations** - Complete all 4 annotation hints on every GA tool
+- [ ] **Phase 7: Error Recovery** - Add recovery guidance to top-10 most-used GA tool error messages
+- [ ] **Phase 8: Structured Output** - Middleware pass-through test then outputSchema + structuredContent on 5-8 core tools
+- [ ] **Phase 9: MCP Resources** - Wire provideResources() and implement org list + permissions resources
+
+## Phase Details
+
+### Phase 6: Tool Annotations
+
+**Goal**: Every GA tool declares complete, consistent annotations so LLM clients make correct tool selection decisions without false confirmation dialogs
+**Depends on**: Phase 5
+**Requirements**: META-01, META-02
+**Success Criteria** (what must be TRUE):
+  1. Every GA tool has all four hints declared: readOnlyHint, destructiveHint, idempotentHint, openWorldHint
+  2. A unit test verifies that each tool's readOnlyHint value matches its tool-categories.ts read/write/execute classification
+  3. No tool that is classified as "read" in tool-categories.ts has readOnlyHint set to false
+  4. No tool that is classified as "write" or "execute" in tool-categories.ts has readOnlyHint set to true
+**Plans**: TBD
+
+### Phase 7: Error Recovery
+
+**Goal**: The top-10 most-used GA tools return actionable error messages that allow an LLM agent to self-repair without human intervention
+**Depends on**: Phase 6
+**Requirements**: ERR-01
+**Success Criteria** (what must be TRUE):
+  1. Each of the top-10 GA tools returns error messages that include both what went wrong and what to try next
+  2. A shared toolError(message, recovery?) factory in mcp-provider-api produces the standardized error format
+  3. No catch block in the top-10 tools silently swallows errors or returns raw stack traces to the LLM
+  4. Error messages distinguish between user-fixable errors (wrong org alias, missing permission) and system errors (network timeout, auth expiry)
+**Plans**: TBD
+
+### Phase 8: Structured Output
+
+**Goal**: 5-8 core GA query tools return machine-readable structuredContent alongside text content, enabling LLM agents to parse results programmatically
+**Depends on**: Phase 7
+**Requirements**: OUT-01, OUT-02
+**Success Criteria** (what must be TRUE):
+  1. A middleware pass-through test confirms that structuredContent set in a tool handler survives wrappedCb unchanged and appears in the final CallToolResult
+  2. 5-8 core tools (including run_soql_query, list_all_orgs, get_username, get_org_info) declare outputSchema and return structuredContent on every successful call
+  3. Each tool's structuredContent is validated against its outputSchema at test time
+  4. Text content remains present alongside structuredContent for backward compatibility with older clients
+**Plans**: TBD
+**UI hint**: no
+
+### Phase 9: MCP Resources
+
+**Goal**: Authenticated org list and per-org permission levels are discoverable as MCP Resources, so LLM agents can inspect available orgs without calling tools
+**Depends on**: Phase 8
+**Requirements**: DISC-01, DISC-02, DISC-03
+**Success Criteria** (what must be TRUE):
+  1. registry-utils.ts calls provideResources() from each provider and registers the results with server.registerResource()
+  2. An MCP client can list resources and receive the authenticated org list as a structured resource
+  3. An MCP client can read a per-org resource and receive that org's permission levels (read/write/execute for each tool category)
+  4. Resources return current data on each read (not cached stale data from startup)
+**Plans**: TBD
+
 ## Progress
 
-**Execution Order:** 1 → 2 → 3 → 4 → 5
+**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -107,3 +162,7 @@ Plans:
 | 3. Wave 1 chdir Removal | v1.1 | 1/1 | Complete | 2026-04-11 |
 | 4. Wave 2 chdir Removal | v1.1 | 1/1 | Complete | 2026-04-11 |
 | 5. Concurrency Enablement | v1.1 | 1/1 | Complete | 2026-04-11 |
+| 6. Tool Annotations | v1.2 | 0/TBD | Not started | - |
+| 7. Error Recovery | v1.2 | 0/TBD | Not started | - |
+| 8. Structured Output | v1.2 | 0/TBD | Not started | - |
+| 9. MCP Resources | v1.2 | 0/TBD | Not started | - |

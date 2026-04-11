@@ -63,19 +63,19 @@ Deferred to future milestones.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| META-01 | TBD | Pending |
-| META-02 | TBD | Pending |
-| ERR-01 | TBD | Pending |
-| OUT-01 | TBD | Pending |
-| OUT-02 | TBD | Pending |
-| DISC-01 | TBD | Pending |
-| DISC-02 | TBD | Pending |
-| DISC-03 | TBD | Pending |
+| META-01 | Phase 6 | Pending |
+| META-02 | Phase 6 | Pending |
+| ERR-01 | Phase 7 | Pending |
+| OUT-02 | Phase 8 | Pending |
+| OUT-01 | Phase 8 | Pending |
+| DISC-03 | Phase 9 | Pending |
+| DISC-01 | Phase 9 | Pending |
+| DISC-02 | Phase 9 | Pending |
 
 **Coverage:**
 - v1.2 requirements: 8 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 8
+- Mapped to phases: 8 (Phases 6-9)
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-11*
