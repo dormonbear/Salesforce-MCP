@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: MCP Best Practices Alignment
 status: planning
-stopped_at: Completed 06-01-PLAN.md — all 10 dx-core GA tools have complete 4-hint annotations
-last_updated: "2026-04-11T10:50:52.577Z"
+stopped_at: Completed 06-02-PLAN.md — all 13 tool files have complete 4-hint annotations
+last_updated: "2026-04-11T10:51:38.773Z"
 last_activity: 2026-04-11 — v1.2 roadmap created, Phases 6-9 defined
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 3
-  completed_plans: 1
-  percent: 33
+  completed_plans: 2
+  percent: 67
 ---
 
 # Project State
@@ -50,6 +50,9 @@ Progress: [░░░░░░░░░░] 0%
 - [Phase 06-01]: retrieve_metadata gets readOnlyHint:true — org-side read classification, local filesystem writes are not counted
 - [Phase 06-01]: assign_permission_set gets idempotentHint:true — assigning same perm set twice is a no-op
 - [Phase 06-01]: deploy_metadata gets openWorldHint:true — deploys to external org network, corrected from pre-existing false
+- [Phase 06-02]: run_code_analyzer readOnlyHint fixed to true — writes temp results file but does not modify Salesforce org state
+- [Phase 06-02]: sfDevopsDetectConflict openWorldHint:true — calls DevOps Center API
+- [Phase 06-02]: title removed from enable_tools annotations block — title belongs at config root not inside annotations
 
 ### Pending Todos
 
@@ -61,6 +64,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-11T10:50:52.572Z
-Stopped at: Completed 06-01-PLAN.md — all 10 dx-core GA tools have complete 4-hint annotations
+Last session: 2026-04-11T10:51:34.199Z
+Stopped at: Completed 06-02-PLAN.md — all 13 tool files have complete 4-hint annotations
 Resume file: None
