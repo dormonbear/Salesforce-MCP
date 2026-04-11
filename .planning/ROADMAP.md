@@ -1,11 +1,96 @@
-# Roadmap
+# Roadmap: Salesforce MCP Server
 
-## Milestone 1: Fix Concurrent Org Race Condition
+## Milestones
 
-### Phase 1: Eliminate per-call .sf/config.json reads and resolve orgs at startup
+- ✅ **v1.0 Fix Concurrent Org Race Condition** - Phase 1 (shipped 2026-04-09)
+- 🚧 **v1.1 Eliminate process.chdir() and Enable Tool Parallelism** - Phases 2-5 (in progress)
 
-- **Goal:** Remove the root cause of the concurrent org race condition by resolving symbolic org names (DEFAULT_TARGET_ORG, DEFAULT_TARGET_DEV_HUB) once at startup, eliminating the redundant per-call config reads in `getConnection()` that depend on `process.cwd()`.
-- **Depends on:** None
-- **Plans:** Not yet planned
+## Phases
 
+<details>
+<summary>✅ v1.0 Fix Concurrent Org Race Condition (Phase 1) — SHIPPED 2026-04-09</summary>
 
+### Phase 1: Eliminate per-call config reads and resolve orgs at startup
+
+**Goal**: Remove the root cause of the concurrent org race condition by resolving symbolic org names once at startup, eliminating redundant per-call config reads in getConnection() that depend on process.cwd().
+**Depends on**: Nothing (first phase)
+**Requirements**: (v1.0 scope)
+**Success Criteria** (what must be TRUE):
+  1. resolveSymbolicOrgs() resolves DEFAULT_TARGET_ORG and DEFAULT_TARGET_DEV_HUB once at startup
+  2. getConnection() no longer calls getAllAllowedOrgs() or findOrgByUsernameOrAlias() on every invocation
+  3. All existing tests pass with no regressions
+**Plans**: Complete
+
+</details>
+
+### 🚧 v1.1 Eliminate process.chdir() and Enable Tool Parallelism (In Progress)
+
+**Milestone Goal:** Remove process.chdir() from all 14 open-source tools, fix ancillary bugs, and unlock parallel tool execution by eliminating the global Mutex.
+
+- [ ] **Phase 2: Prerequisites** - Consolidate shared params, fix SIGTERM bug, complete tool categories
+- [ ] **Phase 3: Wave 1 chdir Removal** - Remove chdir from 10 connection-only tools
+- [ ] **Phase 4: Wave 2 chdir Removal** - Remove chdir from 4 SfProject-dependent tools
+- [ ] **Phase 5: Concurrency Enablement** - Fix auth.ts CWD dependency, remove global Mutex, add targeted lock
+
+## Phase Details
+
+### Phase 2: Prerequisites
+
+**Goal**: Shared infrastructure is in place and ancillary bugs are fixed before any chdir removal begins
+**Depends on**: Phase 1
+**Requirements**: PREREQ-01, PREREQ-02, PREREQ-03, PREREQ-04
+**Success Criteria** (what must be TRUE):
+  1. Any provider can import directoryParam and sanitizePath from mcp-provider-api without local copies
+  2. SIGTERM signal terminates the server process cleanly (process.on instead of process.stdin.on)
+  3. tool-categories.ts returns correct read/write/execute classification for every tool in devops, code-analyzer, mobile-web, scale-products, and metadata-enrichment providers
+  4. No provider package contains its own duplicate copy of directoryParam or sanitizePath
+**Plans**: TBD
+
+### Phase 3: Wave 1 chdir Removal
+
+**Goal**: The 10 connection-only tools execute correctly without calling process.chdir(), while the global Mutex remains in place as a safety net
+**Depends on**: Phase 2
+**Requirements**: CHDIR-01, CHDIR-02, CHDIR-03, CHDIR-04, CHDIR-05, CHDIR-06, CHDIR-07, CHDIR-08, CHDIR-09, CHDIR-10
+**Success Criteria** (what must be TRUE):
+  1. run_soql_query, assign_permission_set, open_org, delete_org, run_apex_test, run_agent_test, list_all_orgs, get_username, resume_tool_operation, and create_org_snapshot all return correct results without a process.chdir() call in their execution path
+  2. No process.chdir() call appears in the source of any of the 10 Wave 1 tool files
+  3. All existing tests pass after removal
+**Plans**: TBD
+
+### Phase 4: Wave 2 chdir Removal
+
+**Goal**: The 4 SfProject-dependent tools execute correctly by passing explicit projectPath to @salesforce/core APIs, without calling process.chdir()
+**Depends on**: Phase 3
+**Requirements**: CHDIR-11, CHDIR-12, CHDIR-13, CHDIR-14, CHDIR-15
+**Success Criteria** (what must be TRUE):
+  1. deploy_metadata and retrieve_metadata pass an explicit path to SfProject.resolve() and SourceTracking.create() and complete without process.chdir()
+  2. create_scratch_org completes without process.chdir() with its Org.create() path verified as CWD-free
+  3. enrich_metadata completes without process.chdir() with metadata-enrichment library CWD usage confirmed safe
+  4. scan_apex_class_for_antipatterns completes without process.chdir()
+  5. All existing tests pass after removal
+**Plans**: TBD
+
+### Phase 5: Concurrency Enablement
+
+**Goal**: The global toolExecutionMutex is removed and parallel tool execution is safe, with lwc-experts tools protected by a targeted per-tool lock
+**Depends on**: Phase 4
+**Requirements**: CONC-01, CONC-02, CONC-03, CONC-04, CONC-05
+**Success Criteria** (what must be TRUE):
+  1. auth.ts getDefaultConfig() accepts an explicit projectPath parameter and no longer calls ConfigAggregator.clearInstance(process.cwd())
+  2. SfMcpServer.registerTool() middleware dispatches tool handlers as independent Promises without a global Mutex
+  3. lwc-experts tools serialize through a targeted per-tool Mutex while all other tools run concurrently
+  4. A concurrent stress test of 5 or more tools executing in parallel completes without race conditions or data corruption
+  5. All existing tests pass after Mutex removal
+**Plans**: TBD
+
+## Progress
+
+**Execution Order:** 1 → 2 → 3 → 4 → 5
+
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 1. Eliminate per-call config reads | v1.0 | — | Complete | 2026-04-09 |
+| 2. Prerequisites | v1.1 | 0/TBD | Not started | - |
+| 3. Wave 1 chdir Removal | v1.1 | 0/TBD | Not started | - |
+| 4. Wave 2 chdir Removal | v1.1 | 0/TBD | Not started | - |
+| 5. Concurrency Enablement | v1.1 | 0/TBD | Not started | - |

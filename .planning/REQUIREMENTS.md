@@ -103,4 +103,4 @@ Deferred to future release. Tracked but not in current roadmap.
 
 ---
 *Requirements defined: 2026-04-11*
-*Last updated: 2026-04-11 after initial definition*
+*Last updated: 2026-04-11 after roadmap creation*
