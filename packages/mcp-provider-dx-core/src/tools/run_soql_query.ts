@@ -15,7 +15,8 @@
  */
 
 import { z } from 'zod';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, McpToolConfig, ReleaseState, Services, Toolset, toolError, classifyError } from '@salesforce/mcp-provider-api';
+import { SfError } from '@salesforce/core';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { textResponse } from '../shared/utils.js';
 import { directoryParam, usernameOrAliasParam, useToolingApiParam } from '../shared/params.js';
@@ -90,17 +91,25 @@ export class QueryOrgMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
 
       return textResponse(`SOQL query results:\n\n${JSON.stringify(result, null, 2)}`);
     } catch (error) {
-      let errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const sfErr = SfError.wrap(error);
 
-      if (errorMessage.endsWith('is not supported.')) {
-        if (input.useToolingApi) {
-          errorMessage += '\nTry not using the Tooling API for this query.';
-        } else {
-          errorMessage += '\nTry using the Tooling API for this query.';
-        }
+      if (sfErr.message.endsWith('is not supported.')) {
+        const hint = input.useToolingApi
+          ? 'Try setting useToolingApi to false for this query.'
+          : 'Try setting useToolingApi to true for this query.';
+        return toolError(`SOQL query failed: ${sfErr.message}`, {
+          recovery: hint,
+          category: 'user',
+        });
       }
 
-      return textResponse(`Failed to query org: ${errorMessage}`, true);
+      const recovery = sfErr.actions?.join(' ')
+        ?? 'Check the SOQL syntax and field names. Use salesforce_describe_object to verify available fields on the target object.';
+
+      return toolError(`Failed to query org: ${sfErr.message}`, {
+        recovery,
+        category: classifyError(sfErr),
+      });
     }
   }
 }

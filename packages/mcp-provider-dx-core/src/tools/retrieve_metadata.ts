@@ -15,12 +15,12 @@
  */
 
 import { z } from 'zod';
-import { Connection, Org, SfProject } from '@salesforce/core';
+import { Connection, Org, SfError, SfProject } from '@salesforce/core';
 import { SourceTracking } from '@salesforce/source-tracking';
 import { ComponentSet, ComponentSetBuilder } from '@salesforce/source-deploy-retrieve';
 import { ensureString } from '@salesforce/ts-types';
 import { Duration } from '@salesforce/kit';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, McpToolConfig, ReleaseState, Services, Toolset, toolError, classifyError } from '@salesforce/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
 import { textResponse } from '../shared/utils.js';
@@ -162,10 +162,22 @@ Retrieve X metadata from my org and ignore any conflicts between the local proje
       return textResponse(`Retrieve result: ${JSON.stringify(retrieveResult)}`, !retrieveResult.success);
       // }
     } catch (error) {
-      return textResponse(
-        `Failed to retrieve metadata: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        true,
-      );
+      const err = SfError.wrap(error);
+
+      if (err.message.includes('timed out')) {
+        return toolError('Retrieve timed out before completion.', {
+          recovery: 'Retry with a smaller component set, or check org connectivity.',
+          category: 'system',
+        });
+      }
+
+      const recovery = err.actions?.join(' ')
+        ?? 'Verify the metadata exists in the org. Check sourceDir paths or manifest contents.';
+
+      return toolError(`Failed to retrieve metadata: ${err.message}`, {
+        recovery,
+        category: classifyError(err),
+      });
     }
   }
 }

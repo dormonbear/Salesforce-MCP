@@ -20,7 +20,7 @@ import { SourceTracking } from '@salesforce/source-tracking';
 import { ComponentSet, ComponentSetBuilder } from '@salesforce/source-deploy-retrieve';
 import { ensureString } from '@salesforce/ts-types';
 import { Duration } from '@salesforce/kit';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, McpToolConfig, ReleaseState, Services, Toolset, toolError, classifyError } from '@salesforce/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
 import { textResponse } from '../shared/utils.js';
@@ -192,15 +192,21 @@ Deploy X to my org and run A,B and C apex tests.`,
       return textResponse(`Deploy result: ${JSON.stringify(result.response)}`, !result.response.success);
     } catch (error) {
       const err = SfError.wrap(error);
+
       if (err.message.includes('timed out')) {
-        return textResponse(
-          `
-YOU MUST inform the user that the deploy timed out and if they want to resume the deploy, they can use the #resume_tool_operation tool
-and ${jobId} for the jobId parameter.`,
-          true,
-        );
+        return toolError('Deploy timed out before completion.', {
+          recovery: `Use resume_tool_operation with jobId "${jobId}" to check deploy status and wait for completion.`,
+          category: 'system',
+        });
       }
-      return textResponse(`Failed to deploy metadata: ${err.message}`, true);
+
+      const recovery = err.actions?.join(' ')
+        ?? 'Verify source files exist and contain valid metadata. If access denied, check org permissions with assign_permission_set.';
+
+      return toolError(`Failed to deploy metadata: ${err.message}`, {
+        recovery,
+        category: classifyError(err),
+      });
     }
   }
 }

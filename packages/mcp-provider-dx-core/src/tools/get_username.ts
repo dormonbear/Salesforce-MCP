@@ -15,7 +15,7 @@
  */
 
 import { z } from 'zod';
-import { McpTool, McpToolConfig, OrgConfigInfo, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, McpToolConfig, OrgConfigInfo, ReleaseState, Services, Toolset, toolError, classifyError } from '@salesforce/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { type OrgService } from '@salesforce/mcp-provider-api';
 import { textResponse } from '../shared/utils.js';
@@ -163,10 +163,11 @@ YOU MUST inform the user that we are going to use "${suggestedUsername}" ${
 YOU MUST explain the reasoning for selecting this org, which is: "${reasoning}"
 UNLESS THE USER SPECIFIES OTHERWISE, use this username for the "usernameOrAlias" parameter in future Tool calls.`);
     } catch (error) {
-      return textResponse(
-        `Failed to determine appropriate username: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        true,
-      );
+      const err = error instanceof Error ? error : new Error(String(error));
+      return toolError(`Failed to determine appropriate username: ${err.message}`, {
+        recovery: 'Check that orgs are authorized. Run list_all_orgs to see available orgs, or check MCP server startup args for allowlisted orgs.',
+        category: classifyError(err),
+      });
     }
   }
 }

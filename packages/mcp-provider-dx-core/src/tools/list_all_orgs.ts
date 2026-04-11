@@ -15,7 +15,7 @@
  */
 
 import { z } from 'zod';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, McpToolConfig, ReleaseState, Services, Toolset, toolError, classifyError } from '@salesforce/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { textResponse } from '../shared/utils.js';
 import { directoryParam } from '../shared/params.js';
@@ -80,12 +80,16 @@ List all orgs`,
     };
   }
 
-  public async exec(input: InputArgs): Promise<CallToolResult> {
+  public async exec(_input: InputArgs): Promise<CallToolResult> {
     try {
       const orgs = await this.services.getOrgService().getAllowedOrgs();
       return textResponse(`List of configured Salesforce orgs:\n\n${JSON.stringify(orgs, null, 2)}`);
     } catch (error) {
-      return textResponse(`Failed to list orgs: ${error instanceof Error ? error.message : 'Unknown error'}`, true);
+      const err = error instanceof Error ? error : new Error(String(error));
+      return toolError(`Failed to list orgs: ${err.message}`, {
+        recovery: 'Check that at least one org is authorized. Re-authenticate with "sf org login" if auth expired.',
+        category: classifyError(err),
+      });
     }
   }
 }
