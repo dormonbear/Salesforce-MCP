@@ -14,7 +14,25 @@
  * limitations under the License.
  */
 
-import { McpProvider, McpTool, Services } from '@salesforce/mcp-provider-api';
+/*
+ * Copyright 2026, Salesforce, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import { McpProvider, McpResource, McpResourceTemplate, McpTool, Services } from '@salesforce/mcp-provider-api';
+import { OrgListResource } from './resources/org-list-resource.js';
+import { OrgPermissionsResource } from './resources/org-permissions-resource.js';
 import { AssignPermissionSetMcpTool } from './tools/assign_permission_set.js';
 import { CreateOrgSnapshotMcpTool } from './tools/create_org_snapshot.js';
 import { CreateScratchOrgMcpTool } from './tools/create_scratch_org.js';
@@ -42,6 +60,13 @@ export {
 export class DxCoreMcpProvider extends McpProvider {
   public getName(): string {
     return 'DxCoreMcpProvider';
+  }
+
+  public provideResources(services: Services): Promise<(McpResource | McpResourceTemplate)[]> {
+    return Promise.resolve([
+      new OrgListResource(services),
+      new OrgPermissionsResource(services),
+    ]);
   }
 
   public provideTools(services: Services): Promise<McpTool[]> {
