@@ -23,7 +23,8 @@ import Cache from './utils/cache.js';
 import { resolveSymbolicOrgs } from './utils/auth.js';
 import { Telemetry } from './telemetry.js';
 import { SfMcpServer } from './sf-mcp-server.js';
-import { registerToolsets } from './utils/registry-utils.js';
+import { registerToolsets, registerResourcesFromProviders } from './utils/registry-utils.js';
+import { MCP_PROVIDER_REGISTRY } from './registry.js';
 import { Services } from './services.js';
 import { parseOrgPermissions } from './utils/org-permissions.js';
 
@@ -200,6 +201,8 @@ You can also use special values to control access to orgs:
         'allow-non-ga-tools': flags['allow-non-ga-tools'],
         debug: flags.debug,
       },
+      orgPermissions,
+      authorizedOrgs: resolvedOrgList,
     });
 
     await registerToolsets(
@@ -210,6 +213,8 @@ You can also use special values to control access to orgs:
       server,
       services
     );
+
+    await registerResourcesFromProviders(MCP_PROVIDER_REGISTRY, services, server);
 
     const transport = new StdioServerTransport();
     await server.connect(transport);

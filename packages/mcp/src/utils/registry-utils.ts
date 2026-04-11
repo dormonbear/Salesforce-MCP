@@ -178,6 +178,36 @@ async function createToolRegistryFromProviders(
   return registry;
 }
 
+export async function registerResourcesFromProviders(
+  providers: McpProvider[],
+  services: Services,
+  server: SfMcpServer
+): Promise<void> {
+  const resourcePromises = providers.map((provider) => {
+    validateMcpProviderVersion(provider);
+    return provider.provideResources(services);
+  });
+  const allResources = (await Promise.all(resourcePromises)).flat();
+
+  for (const resource of allResources) {
+    if (resource.kind === 'McpResource') {
+      server.registerResource(
+        resource.getName(),
+        resource.getUri(),
+        resource.getConfig(),
+        (uri, extra) => resource.read(uri, extra)
+      );
+    } else {
+      server.registerResource(
+        resource.getName(),
+        resource.getTemplate(),
+        resource.getConfig(),
+        (uri, variables, extra) => resource.read(uri, variables, extra)
+      );
+    }
+  }
+}
+
 /**
  * Validation function to confirm that providers are at the expected major version.
  */
