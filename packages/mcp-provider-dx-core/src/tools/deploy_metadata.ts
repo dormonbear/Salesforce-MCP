@@ -120,8 +120,10 @@ Deploy X to my org and run A,B and C apex tests.`,
       inputSchema: deployMetadataParams.shape,
       outputSchema: undefined,
       annotations: {
+        readOnlyHint: false,
         destructiveHint: true,
-        openWorldHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
       },
       
     };

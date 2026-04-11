@@ -89,6 +89,9 @@ export class AssignPermissionSetMcpTool extends McpTool<InputArgsShape, OutputAr
       inputSchema: assignPermissionSetParamsSchema.shape,
       outputSchema: undefined,
       annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
         openWorldHint: true,
       },
     };
