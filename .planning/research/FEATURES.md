@@ -1,180 +1,358 @@
-# Feature Research
+# Feature Landscape: MCP Best Practices Alignment (v1.2)
 
-**Domain:** MCP Server refactoring — eliminating process.chdir() and enabling parallel tool execution
+**Domain:** MCP Server — protocol compliance and observability improvements
 **Researched:** 2026-04-11
-**Confidence:** HIGH (based on direct code inspection of all 15 affected files)
+**Confidence:** HIGH (spec verified against modelcontextprotocol.io 2025-06-18 spec + TypeScript SDK source)
 
 ---
 
-## How the 14 Tools Currently Work
+## What This Milestone Adds
 
-All 14 tools receive a `directory` parameter (an absolute path to the user's Salesforce DX project). They call `process.chdir(input.directory)` so that `@salesforce/core` APIs pick up the local `.sf/config.json` from that directory. The 15th file (`sf-mcp-server.ts`) wraps every tool call in a `toolExecutionMutex.lock()` to prevent concurrent CWD mutations from corrupting each other's state.
+This milestone does not add Salesforce features. It adds MCP protocol compliance features to the server layer: better metadata on tools, better error communication to LLMs, structured return values, new primitives (Resources and Prompts), and protocol-level logging.
 
-The actual APIs that depend on CWD:
-- `ConfigAggregator.create()` — reads `.sf/config.json` from `process.cwd()` (used in `getDefaultTargetOrg`, `getDefaultTargetDevHub`)
-- `SfProject.resolve()` — walks up from `process.cwd()` to find `sfdx-project.json`
-- `SourceTracking.create()` — depends on project path resolved by `SfProject`
-
-After v1.0's `resolveSymbolicOrgs()` at startup, `ConfigAggregator` no longer needs to be called per-tool. The remaining CWD dependency is `SfProject.resolve()` (used in `deploy_metadata` and `retrieve_metadata`) and external library calls in the scale-products and metadata-enrichment packages.
+All six target features operate on the MCP boundary layer (`packages/mcp` and `packages/mcp-provider-api`). Individual tool packages are touched for annotations and error messages but follow uniform patterns.
 
 ---
 
-## Feature Landscape
+## How Each Feature Works (Protocol-Level Facts)
 
-### Table Stakes (Users Expect These)
+### Feature 1: Tool Annotations
 
-Features that must be delivered to meet the milestone's stated goal.
+**Spec:** Four boolean hints on every tool's `annotations` field (2025-03-26 spec, current).
 
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| Remove process.chdir() from Wave 1 tools (10 tools) | chdir is already unnecessary post-v1.0; no risk | LOW | list_all_orgs, get_username, run_soql_query, assign_permission_set, delete_org, open_org, run_apex_test, run_agent_test, resume_tool_operation, create_org_snapshot — all call getConnection() which no longer needs CWD |
-| Remove process.chdir() from Wave 2 tools (deploy_metadata, retrieve_metadata, create_scratch_org) | These pass input.directory explicitly to SfProject.resolve() — chdir is redundant | MEDIUM | deploy_metadata and retrieve_metadata already pass `input.directory` to `SfProject.resolve(input.directory)` directly; chdir removal is safe; create_scratch_org reads the definition file from input.directory (already absolute path) |
-| Remove process.chdir() from Wave 3 tools (scan_apex_antipatterns, enrich_metadata) | Needed to eliminate all 14 usages before Mutex removal | HIGH | Requires verifying whether internal @salesforce/core calls inside these tools' library dependencies use process.cwd(); may need API changes or explicit path threading |
-| Remove toolExecutionMutex from sf-mcp-server.ts | Core goal: enable parallel execution | MEDIUM | Must come last, only after all 14 chdir calls are removed; removal is a single-line change but the precondition (all chdir gone) is the hard part |
-| Fix SIGTERM handler bug | Current handler is on process.stdin.on('SIGTERM') which never fires; SIGTERM is a process-level signal | LOW | Change `process.stdin.on('SIGTERM', ...)` to `process.on('SIGTERM', ...)` in index.ts |
-| Complete tool-categories.ts | Missing tool classifications default to 'write' — permission system may incorrectly block or allow tools | LOW | scan_apex_antipatterns, enrich_metadata, and several provider tools not yet in the map; missing entries fall through to the 'write' default |
-| Consolidate directoryParam/sanitizePath to mcp-provider-api | directoryParam is currently defined in mcp-provider-dx-core/shared/params.ts; enrich_metadata imports it from there — coupling across provider packages | LOW | Move definition to mcp-provider-api package where it belongs; update all imports |
+| Hint | Default | Meaning | Primary client use |
+|------|---------|---------|-------------------|
+| `readOnlyHint` | `false` | Tool does not modify environment | Skip confirmation dialog; safe for autonomous agents |
+| `destructiveHint` | `true` | Modification is irreversible (only applies when readOnlyHint=false) | Trigger confirmation warning |
+| `idempotentHint` | `false` | Calling twice with same args has no extra effect | Safe to retry automatically on transient failure |
+| `openWorldHint` | `true` | Tool reaches external services (network, org APIs) | Used by policy engines to classify tool reach |
 
-### Differentiators (Competitive Advantage)
+**Current state in this codebase:** The `annotations` field is present in `McpTool.getConfig()` return type but partial. 14 of ~20 dx-core files have at least one annotation. Specific gaps found by inspection:
+- `create_org_snapshot.ts` — `annotations: {}` (empty, all defaults apply)
+- `run_apex_test.ts` — has `openWorldHint: true` but missing `readOnlyHint`/`destructiveHint`/`idempotentHint`
+- `run_agent_test.ts` — same gap as run_apex_test
+- `delete_org.ts` — no `readOnlyHint: false` / `destructiveHint: true` explicitly set
+- `assign_permission_set.ts` — has `openWorldHint: true` but missing the other three
+- `resume_tool_operation.ts` — partial
+- `create_scratch_org.ts` — partial
+- 6+ tools in non-dx-core packages (devops, scale-products, metadata-enrichment) need audit
 
-Capabilities that become possible once chdir is removed.
+**Correct patterns to apply:**
+```
+Read-only query tools (run_soql_query, list_all_orgs, get_org_info, get_username):
+  readOnlyHint: true, openWorldHint: true
 
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| True parallel tool execution across different orgs | An AI agent can query org A's data while deploying to org B simultaneously — currently impossible because the Mutex serializes everything | MEDIUM | Enabled automatically once all chdir removed and Mutex dropped; the MCP SDK's stdio transport already supports concurrent requests |
-| Parallel tool execution within same org (read operations) | Multiple read tools (run_soql_query, get_username, run_apex_test) can run concurrently against the same org | LOW | All Wave 1 tools become safe to run concurrently after chdir removal; no additional work needed |
-| Accurate wall-clock timing in telemetry | Currently runtimeMs in TOOL_CALLED events includes Mutex wait time, making slow-org tools appear even slower | LOW | After Mutex removal, runtimeMs reflects actual tool execution time |
-| Eliminated "directory" parameter requirement for simple tools | Wave 1 tools technically no longer need the directory param at all after chdir removal; it becomes a no-op | LOW | Cannot remove from schema (backward compat), but future deprecation path becomes clear |
+Additive/non-destructive write tools (create_scratch_org, assign_permission_set, deploy_metadata):
+  readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true
 
-### Anti-Features (Commonly Requested, Often Problematic)
+Destructive/irreversible tools (delete_org):
+  readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true
 
-| Feature | Why Requested | Why Problematic | Alternative |
-|---------|---------------|-----------------|-------------|
-| Remove "directory" parameter from tool schemas | Once chdir is gone, passing directory feels pointless for Wave 1 tools | Breaking change to MCP tool input schemas; agents that already pass directory would break; MCP convention is to keep schemas stable across versions | Keep the parameter, stop using it internally; add deprecation note to description; plan removal for a future major version |
-| Replace Mutex with per-org Mutex | Sounds like an improvement — only serialize tools hitting the same org | Still doesn't solve the root cause (CWD is process-global, not per-org); adds complexity with marginal gain | Remove Mutex entirely after chdir removal — that is the correct fix |
-| Patch @salesforce/core's CWD usage globally | Override process.cwd() via sinon-style mocking or AsyncLocalStorage to inject per-call directory | Extremely fragile, not officially supported, will break with any @salesforce/core update, impossible to test reliably | Thread explicit path parameters into API calls that accept them (SfProject.resolve(path), ConfigAggregator.create(path)); verify each Wave 3 tool individually |
-| Lazy Mutex removal (remove only when all tools are done) | Wait until every last tool is fixed before touching the Mutex | That is actually the correct approach — listed here to reinforce it is not an anti-feature | Keep existing Mutex until the last chdir is removed in the same PR/commit |
+Idempotent write tools (retrieve_metadata — overwriting local files):
+  readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true
+```
+
+**Implementation cost:** LOW per tool. No API changes. Pure metadata. Pattern is mechanical once the classification matrix is agreed upon.
+
+**Client behavior change:** Claude Code and ChatGPT Dev Mode suppress confirmation dialogs for `readOnlyHint: true` tools. Without it, Claude Code shows write-tool warnings on every SOQL query — confirmed as the problem this fixes (DEV Community issue: "My MCP Tools Were Showing as Write Tools in ChatGPT Dev Mode").
+
+---
+
+### Feature 2: Error Messages with Recovery Guidance
+
+**Problem:** Current pattern is `return textResponse(`Failed to X: ${err.message}`, true)`. When the LLM receives "Failed to deploy metadata: DUPLICATE_DEVELOPER_NAME", it has no recovery path — it cannot determine whether to retry, what to change, or which other tool to call.
+
+**Correct pattern (from MCP spec + production evidence):** Return `isError: true` in a `CallToolResult`, but populate the text content with structured recovery guidance. The message should answer: (1) what failed, (2) why it likely failed, (3) what the LLM should do next.
+
+Three error categories with patterns:
+
+**Category A — Tool ordering / prerequisite failure:**
+```
+Bad:  "Failed to terminate instance: error code 412"
+Good: "Cannot delete org while deployment is in progress.
+       1. Call resume_tool_operation with the pending job ID to check status.
+       2. Wait for the deployment to complete or cancel it.
+       3. Then retry delete_org."
+```
+
+**Category B — Input validation failure:**
+```
+Bad:  "Invalid parameter: apexTestLevel"
+Good: "Cannot specify both 'apexTests' and 'apexTestLevel' parameters.
+       Use 'apexTests' to list specific test class names, OR use 'apexTestLevel' to
+       specify a level (RunLocalTests, RunAllTestsInOrg). Remove one of the two."
+```
+
+**Category C — Unknown/transient failure:**
+```
+Bad:  "Failed to run SOQL query: ECONNRESET"
+Good: "Salesforce org connection was reset (ECONNRESET). This is usually transient.
+       Retry the same query. If this is the third attempt, check org connectivity
+       using get_org_info before retrying."
+```
+
+**Current codebase state:** Several tools already have good inline validation messages (deploy_metadata has detailed parameter conflict messages). The gap is in catch blocks where raw `err.message` is passed through. Count: approximately 30 catch blocks across all packages return bare error messages.
+
+**Implementation cost:** MEDIUM. Requires reading each tool's error surface and writing domain-appropriate messages. Cannot be automated. Best done tool-by-tool, starting with the 10 highest-frequency tools.
+
+**SDK compatibility note:** The `isError: true` + no `outputSchema` combination always works. If a tool has an `outputSchema`, a bug in SDK <1.8 (issue #654) prevented `isError: true` responses from bypassing schema validation. This was fixed in SDK PR #655 (merged June 24, 2025). Since this project targets `^1.18.0`, the fix is present.
+
+---
+
+### Feature 3: Structured Output (structuredContent)
+
+**Spec:** Tools may return a `structuredContent` JSON object alongside the `content` text array. If an `outputSchema` (Zod shape) is declared on the tool, the SDK validates `structuredContent` against it. For backward compatibility, the serialized JSON must also appear as a text block.
+
+**SDK pattern (`^1.18.0`):**
+```typescript
+server.registerTool(
+  'run_soql_query',
+  {
+    inputSchema: z.object({ query: z.string(), ... }),
+    outputSchema: z.object({
+      records: z.array(z.record(z.unknown())),
+      totalSize: z.number(),
+      done: z.boolean(),
+    }),
+  },
+  async (args) => {
+    const result = await executeQuery(args);
+    return {
+      content: [{ type: 'text', text: JSON.stringify(result) }], // backward compat
+      structuredContent: result, // machine-parseable
+    };
+  }
+);
+```
+
+**Current state:** `calculateResponseCharCount()` in `sf-mcp-server.ts` already handles `structuredContent` in its character counting (line 304), showing the architecture anticipates it. But no tool actually returns it yet.
+
+**Which tools benefit most from structuredContent:**
+- `run_soql_query` — returns arrays of records; structured output lets agents iterate records directly
+- `list_all_orgs` — returns org list; structured lets agents pick specific orgs without text parsing
+- `get_org_info` — returns a single org object; structured makes field access deterministic
+- `run_apex_test` — returns pass/fail/count; structured allows downstream conditional logic
+
+**Which tools should NOT get outputSchema yet:**
+- Long-text tools (deploy_metadata result blobs) — schema would be overly complex
+- Error-prone tools still using raw err.message — fix error messages first, then add schema
+
+**Implementation cost:** MEDIUM per tool. Requires defining the output shape, ensuring consistency between `content` and `structuredContent`, and writing tests that validate both. The `outputSchema` validation in the SDK is strict — any mismatch throws at runtime.
+
+**Important sequencing:** Add `outputSchema` only to tools that have clean, predictable return structures. Do not add it to tools that return free-form text or where the error path hasn't been cleaned up yet (the isError + outputSchema interaction requires care).
+
+---
+
+### Feature 4: MCP Resources
+
+**Spec:** Resources are application-controlled read-only data sources addressable by URI. They are distinct from tools: the host application (or user) pulls them into context; the LLM does not call them autonomously.
+
+**Protocol mechanics:**
+- Server declares `capabilities: { resources: {} }` (already done in `index.ts` line 182)
+- Client calls `resources/list` → gets URI + name + mimeType list
+- Client calls `resources/read` with a URI → gets text or binary content
+- Optional: `subscribe: true` for change notifications (not needed here)
+
+**Current state:** `McpResource` and `McpResourceTemplate` abstract classes exist in `mcp-provider-api/src/resources.ts` with TODO comments noting the main server does not yet consume them. The server already declares `resources: {}` capability. The wiring is missing: no provider registers resources, and `index.ts` does not call any resource-registration path.
+
+**What resources make sense for this Salesforce MCP server:**
+
+| Resource URI | Content | Use case |
+|---|---|---|
+| `salesforce://orgs` | JSON list of authorized orgs with status | Context for "which orgs can I use?" before tool calls |
+| `salesforce://orgs/{alias}/info` | Org metadata (instance URL, org type, edition) | Context before deciding which tools to run |
+| `salesforce://orgs/{alias}/permissions` | Permission level (read-only, read-write, protected) | Context for "what can I do on this org?" |
+| `salesforce://server/capabilities` | Which toolsets are enabled, server version | Orientation resource for new sessions |
+
+**The `resources: {}` capability is already declared.** The gap is: (1) no `McpResource` implementations exist yet, (2) the main server does not call `server.registerResource()` anywhere, (3) the registry utility (`registerToolsets`) does not have a parallel `registerResources` path.
+
+**Client support reality (2026):** Most clients implement `resources/list` and `resources/read`. Subscriptions are rarely implemented on the client side. Static resources (no template) are universally supported. URI templates have partial client support. Start with static resources only.
+
+**Implementation cost:** MEDIUM. The abstract class infrastructure exists. Need to: (1) create 3-4 concrete `McpResource` implementations, (2) add a `getResources()` method to `McpProvider`, (3) wire registration in `registry-utils.ts`, (4) call `server.registerResource()` for each. The data for these resources is already available (resolved orgs, permissions map, toolset flags) from the startup flow in `index.ts`.
+
+---
+
+### Feature 5: MCP Prompts
+
+**Spec:** Prompts are user-controlled templates that return a `messages` array for direct injection into LLM context. The user explicitly invokes them (e.g., slash commands `/deploy`, `/run-tests`). They encode multi-step workflow sequences that would otherwise require the LLM to improvise.
+
+**Protocol mechanics:**
+- Server declares `capabilities: { prompts: {} }`
+- Client calls `prompts/list` → gets name + description + arguments
+- Client calls `prompts/get` with arguments → gets `messages[]` with role/content pairs
+- Messages can include embedded Resources as context
+
+**Current state:** `McpPrompt` abstract class exists in `mcp-provider-api/src/prompts.ts` with TODO. No concrete implementations exist. The server does not declare `prompts` capability. No wiring in `index.ts`.
+
+**What prompts make sense for this server:**
+
+| Prompt | Arguments | Value |
+|---|---|---|
+| `deploy-to-org` | targetOrg, sourceDir?, runTests? | Pre-flight check → deploy → report results workflow |
+| `run-tests` | targetOrg, testClasses? | Run Apex tests, wait for results, summarize failures |
+| `org-health-check` | targetOrg | Query org info, list recent deployments, surface issues |
+| `query-records` | targetOrg, objectName, fields? | Guided SOQL construction and execution |
+| `scratch-org-setup` | devHub, definitionFile | Create scratch org → assign permissions → deploy metadata |
+
+**The value of prompts here:** The official Salesforce DX MCP server (salesforcecli/mcp) ships 5 prompts and users explicitly reference them as a major usability improvement. The prompt encodes "what tools to call in what order" — preventing the LLM from guessing the workflow and calling tools in the wrong sequence.
+
+**Complexity note:** Unlike resources, prompts require domain knowledge to write well. A `deploy-to-org` prompt must encode the correct pre-flight checks (what validations matter, in what order), handle the async nature of deployments (poll vs. check-status), and surface failures in LLM-actionable format. Writing the prompt _content_ is the hard part, not the protocol wiring.
+
+**Implementation cost:** MEDIUM for wiring (same pattern as resources). HIGH for content quality (domain-specific workflow knowledge needed per prompt). Recommend starting with 2 prompts (deploy + run-tests) that cover the most common workflows, then expanding.
+
+---
+
+### Feature 6: Protocol-Level Logging (logging/setLevel)
+
+**Spec (RFC 5424 syslog levels):** debug, info, notice, warning, error, critical, alert, emergency. Client sends `logging/setLevel` request; server responds empty; server sends `notifications/message` at or above the set level.
+
+**SDK mechanics:**
+```typescript
+// Server must be 'Server' class (not McpServer) OR McpServer with logging capability
+const server = new McpServer(
+  { name: 'sf-mcp-server', version: '...' },
+  {
+    capabilities: {
+      resources: {},
+      tools: {},
+      logging: {},     // ← must declare
+    }
+  }
+);
+
+// Anywhere after connect():
+await server.server.sendLoggingMessage({
+  level: 'info',
+  logger: 'tool-executor',
+  data: { tool: name, org: targetOrg, runtimeMs }
+});
+```
+
+**Critical nuance — McpServer vs Server:** `sendLoggingMessage` exists on the low-level `Server` class (`@modelcontextprotocol/sdk/server/index.js`), not on `McpServer` directly. Access it via `server.server` (the wrapped instance). This was a documented SDK confusion point (issue #175, now resolved). The capability MUST be declared or the call throws "Server does not support logging".
+
+**Current state:** `SfMcpServer` extends `McpServer` and uses `Logger.childFromRoot('mcp-server')` from `@salesforce/core` for debug logging. This writes to the `@salesforce/core` log file (if configured) but is invisible to MCP clients. The `capabilities` declaration in `index.ts` currently has `resources: {}` and `tools: {}` but no `logging: {}`.
+
+**What to log at each level:**
+- `debug`: Tool called, args (sanitized), org target
+- `info`: Tool completed, runtime, success/failure summary
+- `warning`: Rate limit approaching, deprecated parameter used, permission downgrade
+- `error`: Tool execution error with recovery context (mirrors the error message sent back)
+
+**Telemetry gap (silent catch blocks):** `telemetry.ts` has try/catch blocks around AppInsights calls that swallow errors silently. With MCP logging, telemetry errors can be surfaced as `warning`-level log messages without crashing the tool. The fix is: replace empty catch with `server.server.sendLoggingMessage({ level: 'warning', ... })`.
+
+**Implementation cost:** LOW for wiring (add `logging: {}` to capabilities, replace `this.logger.debug` with `sendLoggingMessage` calls in `sf-mcp-server.ts`). MEDIUM for the telemetry visibility fix (requires understanding which AppInsights failures are expected vs. unexpected).
+
+---
+
+## Table Stakes (Must Ship in v1.2)
+
+| Feature | Why Required | Complexity | Phase Candidate |
+|---------|--------------|------------|-----------------|
+| Complete tool annotations on all 49+ tools | Missing `readOnlyHint` causes write-tool warnings on read-only tools in Claude Code; without this, Claude Code will prompt for confirmation on every SOQL query | LOW per tool, MEDIUM total (audit + classify all tools) | Phase 1 |
+| Error messages with recovery guidance | Current bare `err.message` strings are conversation-killers; LLM cannot self-repair without next-step hints | MEDIUM (requires per-tool domain knowledge) | Phase 2 |
+| Protocol-level logging (`logging/setLevel`) | `--debug` flag is inert for most MCP clients; operators have no observability; telemetry errors are silently swallowed | LOW wiring + MEDIUM telemetry fix | Phase 2 |
+| MCP Resources (org info, permissions) | `resources: {}` capability is already declared but no resources exist — clients see an empty list, making the capability declaration misleading | MEDIUM (infrastructure + 3-4 implementations) | Phase 3 |
+| MCP Prompts (2 core workflows) | Protocol wiring is missing; `McpPrompt` class exists but nothing is registered | MEDIUM wiring + HIGH content per prompt | Phase 3 |
+| structuredContent for core query tools | `calculateResponseCharCount` in sf-mcp-server.ts already handles structuredContent; tools just need to start returning it | MEDIUM per tool | Phase 4 |
+
+---
+
+## Differentiators (Set This Server Apart)
+
+| Feature | Value Proposition | Complexity |
+|---------|-------------------|------------|
+| Recovery-aware error messages with tool-ordering hints | When deploy fails, tell the LLM exactly which tool to call next and with what args — very few MCP servers do this well | MEDIUM |
+| Resource annotations with `audience` and `priority` | Telling the host which resources are `["assistant"]` priority lets Claude Code auto-inject them vs. requiring explicit user selection | LOW (add metadata to resource definitions) |
+| Prompt-embedded resource links | Prompts that reference `salesforce://orgs/{alias}/info` as embedded resources so LLMs get org context automatically when invoking a prompt | LOW (within each prompt's message content) |
+| `outputSchema` on structured tools | Enables strict client-side validation and typed downstream processing; only ~5% of MCP servers in the wild do this | MEDIUM per tool |
+
+---
+
+## Anti-Features (Do Not Build)
+
+| Anti-Feature | Why Avoid | What to Do Instead |
+|---|---|---|
+| Resources with `subscribe: true` | Org state changes are not real-time; subscriptions would require polling @salesforce/core on a timer; adds complexity for zero client benefit in stdio | Static resources only; return fresh data on each `resources/read` call |
+| Prompt-as-tool (registering prompts as tools so LLM auto-invokes them) | Destroys the user-controlled nature of prompts; loses the "human explicitly selects" guarantee | Keep prompts as prompts; they surface as slash commands in the client |
+| `outputSchema` on all tools immediately | Complex tools (deploy, retrieve) have variable-structure results that don't fit a clean schema; forcing a schema now creates maintenance burden | Add outputSchema incrementally to the 5-8 tools with predictable flat return shapes |
+| Full RFC 5424 log levels in user-facing content | Users don't need `notice`, `alert`, `emergency` for a CLI dev tool | Use debug/info/warning/error; map unexpected states to warning |
+| `listChanged` notifications for resources or prompts | Resources and prompts are static at startup (determined by resolved orgs and enabled toolsets); no events trigger a list change | Omit `listChanged: true` from capabilities; simpler protocol surface |
+| MCP Sampling (server-initiated LLM calls) | This server's model is: agent calls tools, tools return data; the server has no need to make LLM calls itself | Out of scope; no Salesforce workflow requires it |
 
 ---
 
 ## Feature Dependencies
 
 ```
-Wave 1 chdir removal (10 tools)
-    └──enables (partially)──> Mutex removal (still blocked by Waves 2 and 3)
+Phase 1: Tool Annotations
+  → No dependencies. Can start immediately. Pure metadata changes.
+  → Prerequisite for: accurate client-side confirmation dialogs (immediate user benefit)
 
-Wave 2 chdir removal (deploy_metadata, retrieve_metadata, create_scratch_org)
-    └──enables (partially)──> Mutex removal (still blocked by Wave 3)
+Phase 2: Error Messages + Logging
+  → Error messages: no dependencies
+  → Logging wiring: depends on capabilities declaration (trivial 1-line change)
+  → Logging content: benefits from error message improvement being done first
+    (log the same recovery hint in the error message AND as a warning-level log)
 
-Wave 3 chdir removal (scan_apex_antipatterns, enrich_metadata)
-    └──requires──> @salesforce/core API path-threading verification (per tool)
-    └──enables (fully)──> Mutex removal
+Phase 3: Resources + Prompts
+  → Resources: requires knowing resolved orgs + permissions (already available at startup)
+  → Resources MUST be wired before Prompts if prompts embed resource references
+  → Prompts: can reference resources by URI; resource wiring should come first
+  → Both require: adding getResources()/getPrompts() to McpProvider, wiring in registry-utils.ts
 
-[All Waves complete]
-    └──enables──> Mutex removal from sf-mcp-server.ts
-                      └──enables──> Parallel tool execution
-
-SIGTERM fix ──independent──> (no dependencies)
-tool-categories.ts completion ──independent──> (no dependencies)
-directoryParam consolidation ──independent──> (no dependencies, minor coupling fix)
+Phase 4: structuredContent
+  → Depends on error message cleanup (Phase 2): do not add outputSchema to a tool
+    whose catch block still returns bare err.message — the isError path needs to work cleanly
+  → Depends on defining stable output shapes: agree on schemas before implementing
+  → Each tool's structured output is independent of other tools
 ```
 
-### Dependency Notes
+---
 
-- **Wave 3 requires API verification:** Unlike Waves 1 and 2, the scale-products and metadata-enrichment packages make deeper `@salesforce/core` calls whose internal CWD usage must be confirmed before removing chdir. This is the unknown that drives the HIGH complexity rating.
-- **Mutex removal requires all waves:** Removing the Mutex while any tool still calls chdir would re-introduce the race condition. The three-wave approach exists specifically to enable incremental progress without regressing safety.
-- **SIGTERM, tool-categories, directoryParam consolidation are independent:** These can be done in any order, in parallel with Wave 1, and do not block or depend on anything else in the milestone.
+## Implementation Complexity Matrix
+
+| Feature | Files Touched | Risk | Notes |
+|---------|---|---|---|
+| Complete annotations (all tools) | ~30-40 `.ts` files across all packages | LOW | Mechanical; no behavior change; test: verify annotations field is populated |
+| Error messages (catch blocks) | ~30 catch blocks, ~15 tools | MEDIUM | Requires domain knowledge per tool; test: verify isError=true + helpful text |
+| logging/setLevel wiring | `index.ts` (1 line), `sf-mcp-server.ts` (replace debug calls) | LOW | Must add `logging: {}` to capabilities or SDK throws |
+| Telemetry error visibility | `telemetry.ts` (silent catch blocks) | MEDIUM | Replace `catch {}` with `sendLoggingMessage` — need to check AppInsights error types |
+| Resources (wiring) | `mcp-provider-api`, `registry-utils.ts`, `index.ts` | MEDIUM | Abstract class exists; need concrete implementations + registration path |
+| Resources (implementations) | New files in `mcp-provider-dx-core` or `mcp` package | LOW | Data already available; just format and return |
+| Prompts (wiring) | Same files as resources, plus capabilities declaration | MEDIUM | No `prompts` capability declared yet — needs adding to `index.ts` |
+| Prompts (content) | New files per prompt | HIGH | Domain-specific; each prompt is a mini workflow specification |
+| structuredContent (core tools) | ~5-8 tool files + their test files | MEDIUM | Must update outputSchema, return shape, and tests in sync |
 
 ---
 
-## Per-Tool Analysis
+## Existing Infrastructure Already in Place
 
-### Wave 1 — Already Safe to Remove (10 tools)
+These do not need to be built — they just need wiring:
 
-| Tool | Package | Why chdir is unnecessary | API used after chdir |
-|------|---------|--------------------------|----------------------|
-| list_all_orgs | mcp-provider-dx-core | Only calls getOrgService().getAllowedOrgs() — startup-resolved | getAllAllowedOrgs() → AuthInfo.listAllAuthorizations() |
-| get_username | mcp-provider-dx-core | Only calls OrgService methods — startup-resolved | getDefaultTargetOrg(), getAllowedOrgs() |
-| run_soql_query | mcp-provider-dx-core | Only calls getConnection() — no longer CWD-dependent | connection.query() / connection.tooling.query() |
-| assign_permission_set | mcp-provider-dx-core | Only calls getConnection(), StateAggregator — no CWD path | Org.create(), User.create() |
-| delete_org | mcp-provider-dx-core | Only calls getConnection() | Org.create(), org.delete() |
-| open_org | mcp-provider-dx-core | Only calls getConnection(), MetadataResolver (uses absolute filePath, not CWD) | org.getFrontDoorUrl(), org.getMetadataUIURL() |
-| run_apex_test | mcp-provider-dx-core | Only calls getConnection() | TestService(connection).runTestAsynchronous() |
-| run_agent_test | mcp-provider-dx-core | Only calls getConnection() | AgentTester(connection).start() |
-| resume_tool_operation | mcp-provider-dx-core | Only calls getConnection(); MetadataApiDeploy uses explicit connection | MetadataApiDeploy, scratchOrgResume, AgentTester |
-| create_org_snapshot | mcp-provider-dx-core | Only calls getConnection() on both sourceOrg and devHub | devHubConnection.sobject('OrgSnapshot').create() |
-
-### Wave 2 — Need Explicit Path Threading (3 tools)
-
-| Tool | Package | Why chdir is needed | Fix |
-|------|---------|---------------------|-----|
-| deploy_metadata | mcp-provider-dx-core | SfProject.resolve(input.directory) already passes path explicitly; SourceTracking.create() receives the SfProject instance | Remove chdir — SfProject.resolve() already has the path |
-| retrieve_metadata | mcp-provider-dx-core | Same as deploy_metadata | Remove chdir — SfProject.resolve() already has the path |
-| create_scratch_org | mcp-provider-dx-core | reads definitionFile from `input.definitionFile` (absolute path via join) but chdir is before Org.create({aliasOrUsername}) which may trigger ConfigAggregator | Verify Org.create({aliasOrUsername}) doesn't need CWD; replace with connection-based pattern after W-19828802 fix |
-
-### Wave 3 — Requires Library Verification (2 tools)
-
-| Tool | Package | Why complex | Investigation needed |
-|------|---------|-------------|----------------------|
-| scan_apex_antipatterns | mcp-provider-scale-products | Calls resolveOrgConnection() which calls getConnection() — OK; but deeper antipattern detection libraries may have own CWD assumptions | Trace all @salesforce/core calls within AntipatternRegistry, RuntimeDataService, SOQLRuntimeEnricher |
-| enrich_metadata | mcp-provider-metadata-enrichment | Uses SfProject.resolve(input.directory) (already explicit!), ComponentSetBuilder.build() with explicit projectDir, EnrichmentHandler — but EnrichmentHandler from @salesforce/metadata-enrichment is a closed dependency | Inspect @salesforce/metadata-enrichment for any process.cwd() calls |
-
----
-
-## MVP Definition
-
-### Launch With (v1.1)
-
-All items below are required to declare the milestone done.
-
-- [ ] Wave 1: Remove chdir from 10 dx-core tools — straightforward, no risk
-- [ ] Wave 2: Remove chdir from deploy_metadata, retrieve_metadata, create_scratch_org — medium risk, needs targeted testing
-- [ ] Wave 3: Remove chdir from scan_apex_antipatterns and enrich_metadata — after API verification
-- [ ] Remove toolExecutionMutex from sf-mcp-server.ts — only after all above
-- [ ] Fix SIGTERM handler bug — independent, low risk
-- [ ] Complete tool-categories.ts — independent, low risk
-- [ ] Consolidate directoryParam to mcp-provider-api — independent, low coupling fix
-
-### Add After Validation (v1.x)
-
-- [ ] Deprecate `directory` parameter in Wave 1 tool descriptions — once users have adapted to parallel execution and the parameter's no-op nature is confirmed in practice
-- [ ] Verify and document which tools are safe to run concurrently vs. which have external side effects that require ordering — useful for agent orchestration
-
-### Future Consideration (v2+)
-
-- [ ] Remove `directory` parameter from tool schemas entirely — breaking change, requires major version
-- [ ] Per-tool concurrency limits (rate limiting per-operation vs. global) — only if telemetry shows specific operations are being over-called in parallel
-
----
-
-## Feature Prioritization Matrix
-
-| Feature | User Value | Implementation Cost | Priority |
-|---------|------------|---------------------|----------|
-| Wave 1 chdir removal (10 tools) | HIGH — unblocks partial parallelism | LOW | P1 |
-| Fix SIGTERM handler bug | MEDIUM — telemetry data loss on shutdown | LOW | P1 |
-| Complete tool-categories.ts | MEDIUM — permission correctness | LOW | P1 |
-| Consolidate directoryParam | LOW — internal cleanup | LOW | P1 |
-| Wave 2 chdir removal (3 tools) | HIGH — metadata tools are core workflows | MEDIUM | P1 |
-| Wave 3 chdir removal (2 tools) | HIGH — needed to unlock Mutex removal | HIGH | P1 |
-| Remove toolExecutionMutex | HIGH — the actual parallelism unlock | LOW (one line, but gates on all above) | P1 |
-
-All items are P1 because the milestone goal (parallel execution) cannot be achieved without every one of them.
+- `McpResource` and `McpResourceTemplate` abstract classes — `mcp-provider-api/src/resources.ts`
+- `McpPrompt` abstract class and `McpPromptConfig` type — `mcp-provider-api/src/prompts.ts`
+- `calculateResponseCharCount()` handles `structuredContent` — `sf-mcp-server.ts` line 293
+- `capabilities: { resources: {} }` already declared — `index.ts` line 182
+- `annotations` field in tool config type — `sf-mcp-server.ts` line 127
+- `isError: true` pattern already used in middleware — multiple locations in `sf-mcp-server.ts`
 
 ---
 
 ## Sources
 
-- Direct code inspection: `packages/mcp-provider-dx-core/src/tools/*.ts` (all 13 chdir tools)
-- Direct code inspection: `packages/mcp-provider-scale-products/src/tools/scan-apex-antipatterns-tool.ts`
-- Direct code inspection: `packages/mcp-provider-metadata-enrichment/src/tools/enrich_metadata.ts`
-- Direct code inspection: `packages/mcp/src/sf-mcp-server.ts` (Mutex location, SIGTERM bug)
-- Direct code inspection: `packages/mcp/src/utils/auth.ts` (getConnection, ConfigAggregator CWD usage)
-- Direct code inspection: `packages/mcp/src/utils/tool-categories.ts` (missing entries)
-- Direct code inspection: `packages/mcp-provider-dx-core/src/shared/params.ts` (directoryParam definition)
-- `.planning/PROJECT.md` (three-wave approach, out-of-scope constraints)
-- `.planning/STATE.md` (v1.0 context, key technical findings)
+- MCP Tools spec (2025-06-18): https://modelcontextprotocol.io/specification/2025-06-18/server/tools
+- MCP Resources spec (2025-06-18): https://modelcontextprotocol.io/specification/2025-06-18/server/resources
+- MCP Prompts spec (2025-06-18): https://modelcontextprotocol.io/specification/2025-06-18/server/prompts
+- MCP Logging spec (2025-03-26): https://modelcontextprotocol.io/specification/2025-03-26/server/utilities/logging
+- Tool Annotations blog post (2026-03-16): https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/
+- TypeScript SDK docs: https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/server.md
+- SDK issue #175 (sendLoggingMessage on McpServer): https://github.com/modelcontextprotocol/typescript-sdk/issues/175
+- SDK issue #654 (structuredContent + isError conflict): https://github.com/modelcontextprotocol/typescript-sdk/issues/654
+- LLM-friendly error messages: https://alpic.ai/blog/better-mcp-tool-call-error-responses-ai-recover-gracefully
+- Resources and Prompts primitives guide: https://dev.to/aws-heroes/mcp-prompts-and-resources-the-primitives-youre-not-using-3oo1
+- Salesforce DX MCP server reference: https://github.com/salesforcecli/mcp
+- Direct code inspection: `packages/mcp/src/sf-mcp-server.ts`, `index.ts`, `mcp-provider-api/src/`
 
 ---
-*Feature research for: Salesforce MCP Server v1.1 — process.chdir() elimination and parallel execution*
+*Feature research for: Salesforce MCP Server v1.2 — MCP Best Practices Alignment*
 *Researched: 2026-04-11*

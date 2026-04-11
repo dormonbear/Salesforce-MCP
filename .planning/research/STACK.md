@@ -1,300 +1,245 @@
-# Stack Research: Eliminating process.chdir() and Enabling Tool Parallelism
+# Technology Stack
 
-**Domain:** Salesforce MCP Server refactoring — CWD-free concurrent tool execution
+**Project:** Salesforce MCP Server — v1.2 MCP Best Practices Alignment
 **Researched:** 2026-04-11
-**Confidence:** HIGH (verified against compiled @salesforce/core ^8.24.3 and MCP SDK ^1.18.0 source)
+**Confidence:** HIGH (verified against installed SDK 1.18.2 node_modules and 1.29.0 extracted type definitions)
 
 ---
 
-## 1. Which @salesforce/core APIs Internally Use process.cwd()?
+## Verdict: No New Dependencies Required
 
-### SfProject.resolve(path?)
+All five features (Tool Annotations, structuredContent, MCP Resources, MCP Prompts, logging/setLevel) are fully supported by SDK 1.18.2, which `^1.18.0` already resolves to. Zero new npm packages are needed for this milestone.
 
-**CWD dependency:** YES, when `path` is omitted.
+---
 
-```js
-// lib/sfProject.js line 391
-static async resolve(path) {
-    const resolvedPath = await this.resolveProjectPath(path ?? process.cwd());
-    return this.getMemoizedInstance(resolvedPath);
+## SDK Version
+
+| Package | Current Constraint | Installed | Latest Stable | Action |
+|---------|-------------------|-----------|---------------|--------|
+| `@modelcontextprotocol/sdk` | `^1.18.0` | 1.18.2 | 1.29.0 | No change needed |
+
+**Why not upgrade to 1.29.0:** None of the five target features require APIs introduced after 1.18.2. The 1.25+ Zod v4 compat layer (`zod-compat`) is not relevant since the project uses Zod v3. The 1.29.0 `registerTool()` signature change (`ZodRawShape` → `ZodRawShapeCompat`) would require TypeScript updates in `mcp-provider-api` with no functional benefit. PROJECT.md explicitly defers SDK v2.0 (still alpha).
+
+---
+
+## Feature-by-Feature API Availability (SDK 1.18.2)
+
+### 1. Tool Annotations — Complete Remaining Tools
+
+**API:** `ToolAnnotations` type, imported from `@modelcontextprotocol/sdk/types.js`
+
+**All four fields exist in 1.18.2:**
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `readOnlyHint` | `boolean?` | Tool does not modify environment state |
+| `destructiveHint` | `boolean?` | Tool may perform destructive/irreversible changes (only meaningful when `readOnlyHint == false`) |
+| `idempotentHint` | `boolean?` | Repeated calls with same args have no additional effect (only meaningful when `readOnlyHint == false`) |
+| `openWorldHint` | `boolean?` | Tool may interact with entities beyond those listed in inputs |
+
+**Current state:** `ToolAnnotations` is already in `McpToolConfig.annotations` in `mcp-provider-api/src/tools.ts` (line 55). `SfMcpServer.registerTool()` passes annotations through unchanged. Three tools have empty annotation objects; multiple tools are missing `destructiveHint`/`idempotentHint`. This is a pure fill-in task — no framework changes needed.
+
+**Integration point:** `mcp-provider-api/src/tools.ts` `McpToolConfig.annotations` field — no changes required.
+
+---
+
+### 2. structuredContent (Structured Tool Output)
+
+**API:**
+- `outputSchema?: OutputArgsShape` field in `registerTool()` config
+- `structuredContent` field in `CallToolResult` return value
+
+**How the SDK processes it (verified in `server/mcp.js` line 118–122):**
+1. If tool declares `outputSchema`, the SDK expects `result.structuredContent` in the response
+2. If `structuredContent` is missing, SDK logs a warning
+3. SDK validates `structuredContent` against `outputSchema` via `safeParseAsync`
+
+**MCP backward-compat rule:** Tools returning `structuredContent` MUST also include the serialized JSON as a `text` content item so older clients still receive data. This is a per-tool implementation decision, not enforced by the SDK.
+
+**Current state:** `McpToolConfig<InputArgsShape, OutputArgsShape>` already includes `outputSchema?: OutputArgsShape` (line 53 of `tools.ts`). `SfMcpServer.registerTool()` passes `outputSchema` through to `McpServer.prototype.registerTool`. `calculateResponseCharCount()` in `SfMcpServer` already handles `structuredContent` for telemetry (lines 304–313). The `CallToolResult` type in SDK 1.18.2 includes `structuredContent` as an optional typed field.
+
+**Type note:** Use `type` aliases (not `interface`) for structured output shapes to avoid index signature type errors when assigning to `{ [key: string]: unknown }`.
+
+**Integration point:** Per-tool change only. Framework layer requires no changes.
+
+---
+
+### 3. MCP Resources
+
+**API:** `registerResource()` on `McpServer`, from `@modelcontextprotocol/sdk/server/mcp.js`
+
+**Two variants:**
+```typescript
+// Static resource at a fixed URI
+registerResource(
+  name: string,
+  uri: string,
+  config: ResourceMetadata,
+  readCallback: (uri: URL, extra) => ReadResourceResult | Promise<ReadResourceResult>
+): RegisteredResource
+
+// Template resource matching a URI pattern
+registerResource(
+  name: string,
+  template: ResourceTemplate,
+  config: ResourceMetadata,
+  readCallback: (uri: URL, variables: Variables, extra) => ReadResourceResult | Promise<ReadResourceResult>
+): RegisteredResourceTemplate
+```
+
+**`ResourceMetadata`** = `Omit<Resource, 'uri' | 'name'>` — includes `title`, `description`, `mimeType`, `annotations`.
+
+**`ResourceTemplate`** is a class from `@modelcontextprotocol/sdk/server/mcp.js` accepting a URI template string (e.g., `"salesforce://org/{orgAlias}/info"`) and a `list` callback.
+
+**Capability auto-registration:** `McpServer` automatically calls `server.registerCapabilities({ resources: { listChanged: true } })` when the first resource handler is initialized. The `capabilities: { resources: {} }` in `index.ts` line 182 is therefore redundant but harmless.
+
+**Current state:**
+- `McpResource` and `McpResourceTemplate` abstract classes exist in `mcp-provider-api/src/resources.ts` with correct method signatures matching the SDK
+- `McpProvider.provideResources()` exists but is never called by the server
+- `registry-utils.ts` only calls `provider.provideTools()` — resources are skipped
+- `SfMcpServer` does not expose `registerResource()` — this is correct because resources bypass permission/rate-limit middleware (they are read-only)
+
+**Required framework change:** Add a resource registration loop in `registerToolsets()` (or a new `registerResourcesAndPrompts()` function) in `packages/mcp/src/utils/registry-utils.ts`:
+1. Call `provider.provideResources(services)` for each provider
+2. For each returned `McpResource`, call `server.server.registerResource(...)` (via the underlying `Server` instance, not `SfMcpServer` which doesn't wrap resources) — or expose `registerResource()` on `SfMcpServer`
+3. For each returned `McpResourceTemplate`, call the template variant
+
+**Note:** Resources are read-only by MCP spec. Do not route them through the org permission middleware.
+
+---
+
+### 4. MCP Prompts
+
+**API:** `registerPrompt()` on `McpServer`, from `@modelcontextprotocol/sdk/server/mcp.js`
+
+**Signature:**
+```typescript
+registerPrompt<Args extends PromptArgsRawShape>(
+  name: string,
+  config: { title?: string; description?: string; argsSchema?: Args },
+  cb: (args: z.objectOutputType<Args>, extra) => GetPromptResult | Promise<GetPromptResult>
+): RegisteredPrompt
+```
+
+**`PromptArgsRawShape`** (verified in SDK types): `Record<string, ZodType<string, ZodTypeDef, string> | ZodOptional<...>>` — prompt args must be string-typed only (MCP protocol constraint, not SDK constraint). This matches `mcp-provider-api/src/prompts.ts` line 33–35 exactly.
+
+**Capability auto-registration:** `McpServer` automatically calls `server.registerCapabilities({ prompts: { listChanged: true } })` when the first prompt handler is set up.
+
+**Completion helper:** `completable()` from `@modelcontextprotocol/sdk/server/completable.js` is available in 1.18.2. Wraps a Zod string field with an autocomplete callback. Useful for org alias selectors or SObject name fields in Salesforce prompts.
+
+**Current state:**
+- `McpPrompt` abstract class exists in `mcp-provider-api/src/prompts.ts` with correct signatures
+- `McpProvider.providePrompts()` exists but is never called by the server
+- `registry-utils.ts` does not call `providePrompts()`
+
+**Required framework change:** Same as resources — add prompt registration loop to `registry-utils.ts`.
+
+**Do not route prompts through permission middleware.** Prompts are user-invoked templates (the host decides when to call them), not LLM-invoked operations. Rate limiting and org permission checks don't apply.
+
+---
+
+### 5. Protocol-level Logging (logging/setLevel)
+
+**API:** `McpServer.sendLoggingMessage()` (delegates to `Server.sendLoggingMessage()`)
+
+**Parameters:**
+```typescript
+sendLoggingMessage(
+  params: { level: LoggingLevel; logger?: string; data: unknown },
+  sessionId?: string
+): Promise<void>
+```
+
+**`LoggingLevel`** values (verified in `types.d.ts` line 26990): `"debug" | "info" | "notice" | "warning" | "error" | "critical" | "alert" | "emergency"`
+
+**How the SDK handles setLevel (verified in `server/index.js` lines 52–59, 137–139, 233–234):**
+1. Client sends `logging/setLevel` request with a `level`
+2. `Server` handles it in `SetLevelRequestSchema` handler — stores per-session level in `_loggingLevels` Map
+3. `Server.sendLoggingMessage()` calls `isMessageIgnored()` which compares message level against stored level by severity order — messages below the threshold are silently dropped
+4. No custom `setLevel` handler needed in application code
+
+**Capability requirement:** `logging: {}` MUST be declared in `ServerCapabilities`. The `McpServer` does NOT auto-register this capability (unlike tools, resources, and prompts). Without it, `sendLoggingMessage()` silently no-ops and `logging/setLevel` requests throw `"Server does not support logging"`.
+
+**Current state:** `index.ts` line 181–183 declares `capabilities: { resources: {} }` but not `logging: {}`. This is the blocker.
+
+**Required changes:**
+1. Add `logging: {}` to `ServerCapabilities` object in `index.ts`
+2. Bridge `@salesforce/core Logger` to MCP logging: hook into Logger's write lifecycle to emit `sendLoggingMessage` calls at the appropriate level
+3. Surface telemetry errors (currently swallowed in empty `catch {}` blocks in `telemetry.ts` lines 137, 145, 155) via `sendLoggingMessage` at `warning` level — this is the "telemetry error visibility" goal
+
+**`@salesforce/core` Logger mapping:**
+
+| `@salesforce/core` Logger level | MCP `LoggingLevel` |
+|--------------------------------|--------------------|
+| `debug` (10) | `"debug"` |
+| `info` (20) | `"info"` |
+| `warn` (40) | `"warning"` |
+| `error` (50) | `"error"` |
+
+---
+
+## Changes Required — Summary
+
+| Feature | New Packages | Framework Changes | Per-Tool/Resource/Prompt Work |
+|---------|-------------|-------------------|-------------------------------|
+| Tool Annotations | None | None | Fill annotations on 49 tools |
+| structuredContent | None | None | Add `outputSchema` + return `structuredContent` in core tools |
+| MCP Resources | None | Add resource registration loop in `registry-utils.ts`; expose `registerResource` on `SfMcpServer` or call via `server.server` | Implement `McpResource` subclasses for org info, permissions, connection status |
+| MCP Prompts | None | Add prompt registration loop in `registry-utils.ts` | Implement `McpPrompt` subclasses for common Salesforce operations |
+| logging/setLevel | None | Add `logging: {}` capability in `index.ts`; bridge `@salesforce/core` Logger | None |
+
+---
+
+## Error Recovery Guidance — Not a Library, a Pattern
+
+The "error messages with recovery guidance for LLM self-repair" feature requires no new dependencies. It is a writing convention applied during tool error handling:
+
+```typescript
+// Instead of bare error text:
+return { isError: true, content: [{ type: 'text', text: 'Deploy failed' }] }
+
+// Include recovery steps:
+return {
+  isError: true,
+  content: [{
+    type: 'text',
+    text: [
+      'Deploy failed: Component MyClass has compile error on line 5.',
+      '',
+      'Recovery options:',
+      '1. Fix the Apex syntax error in MyClass.cls and retry deploy_metadata',
+      '2. Use retrieve_metadata to get the current server-side version',
+      '3. Run run_apex_test to check for related test failures',
+    ].join('\n')
+  }]
 }
 ```
 
-**Safe pattern:** Always pass `input.directory` explicitly:
-
-```ts
-// BEFORE (CWD-dependent)
-const project = await SfProject.resolve();
-
-// AFTER (CWD-free)
-const project = await SfProject.resolve(input.directory);
-```
-
-All 14 affected tools already pass `input.directory` — they just need to drop the preceding `process.chdir()` call. The `SfProject.resolve(input.directory)` calls are already correct.
+Applied to existing error paths in each tool — no framework changes.
 
 ---
 
-### ConfigAggregator.create(options?)
-
-**CWD dependency:** YES, when `options?.projectPath` is omitted.
-
-```js
-// lib/config/configAggregator.js line 72
-const projectPath = options?.projectPath
-    ? resolve(options.projectPath)
-    : process.cwd();  // <-- CWD-dependent cache key
-```
-
-**Instance cache:** Keyed by absolute path. Different `projectPath` values produce different cached instances.
-
-**Safe pattern:** Pass `projectPath` explicitly:
-
-```ts
-// BEFORE (CWD-dependent)
-await ConfigAggregator.clearInstance(process.cwd());
-const aggregator = await ConfigAggregator.create();
-
-// AFTER (CWD-free)
-await ConfigAggregator.clearInstance(projectPath);
-const aggregator = await ConfigAggregator.create({ projectPath });
-```
-
-This is the critical fix needed in `auth.ts:getDefaultConfig()`. The current code calls `clearInstance(process.cwd())` and `ConfigAggregator.create()` without a projectPath — both use `process.cwd()` as cache key, making concurrent calls with different directories race.
-
----
-
-### Org.create(options)
-
-**CWD dependency:** CONDITIONAL.
-
-- `Org.create({ connection })` — **NO CWD dependency**. Skips ConfigAggregator entirely; uses the provided connection directly (see `org.js:init()` line 999).
-- `Org.create({ aliasOrUsername })` — **YES CWD dependency**. Calls `ConfigAggregator.create()` internally without a projectPath (line 999: `this.options.aggregator ?? (await ConfigAggregator.create())`).
-- `Org.create()` (no args) — **YES CWD dependency**. Reads TARGET_ORG from ConfigAggregator.
-
-**Current usage in tools:** All tools that call `Org.create()` pass `{ connection }`, which is CWD-safe. Exception: `create_scratch_org.ts` calls `Org.create({ aliasOrUsername: input.devHub })` — this creates a CWD dependency.
-
-**Exception — `scratchOrgCreate()` internal call:** The `@salesforce/core` `scratchOrgCreate()` function internally calls `ConfigAggregator.create()` (without projectPath) at two points. This cannot be fixed from outside the library. This is the hardest tool to make parallel-safe.
-
----
-
-### SourceTracking.create(options)
-
-**CWD dependency:** NO, when called correctly with an explicit `project` object.
-
-```js
-// lib/sourceTracking.js line 97
-this.projectPath = options.project.getPath();
-```
-
-`SourceTracking.create({ org, project, ... })` derives all paths from the `project` parameter (an `SfProject` instance). As long as `SfProject` was resolved with an explicit path, `SourceTracking` is CWD-free.
-
----
-
-### AuthInfo.create(options)
-
-**CWD dependency:** NO. Uses `~/.sf/` global state (`StateAggregator`), not project directory.
-
----
-
-### StateAggregator.getInstance()
-
-**CWD dependency:** NO. Singleton keyed on the global Salesforce config directory (`~/.sf/`), not CWD.
-
----
-
-## 2. The Allowlist Pattern: Why chdir() Was Originally Added
-
-The comment `// needed for org allowlist to work` appears in 12 of the 14 tools. This was the historical reason for `process.chdir()`.
-
-**What the comment referred to:** Before v1.0, `getAllowedOrgs()` called `getDefaultTargetOrg()` / `getDefaultTargetDevHub()`, which called `ConfigAggregator.create()` without a projectPath. Since ConfigAggregator uses `process.cwd()` as its cache key, each tool needed to `chdir()` to the project directory to load the correct local `.sf/config.json`.
-
-**Current state after v1.0:** The middleware in `sf-mcp-server.ts` now validates org authorization before the tool runs. The `getConnection()` function in `auth.ts` uses `StateAggregator` (global, CWD-free). The `allowedOrgs` cache is populated at startup.
-
-**Conclusion:** For most tools, `process.chdir()` is now vestigial. The comment is stale. The actual remaining CWD dependency is in `auth.ts:getDefaultConfig()` which is only called when determining default org names — not on every tool call.
-
----
-
-## 3. Tool-by-Tool Classification
-
-### Wave 1 — CWD call is completely vestigial (safe to delete immediately)
-
-Tools that call `process.chdir()` but then only use `getConnection()` + `Org.create({ connection })` or connection-only APIs:
-
-| Tool | APIs Used | CWD Needed? |
-|------|-----------|-------------|
-| `run_soql_query` | `getConnection()`, `connection.query()` | NO |
-| `assign_permission_set` | `getConnection()`, `Org.create({ connection })`, `StateAggregator` | NO |
-| `open_org` | `getConnection()`, `Org.create({ connection })` | NO |
-| `delete_org` | `getConnection()`, `Org.create({ connection })` | NO |
-| `run_apex_test` | `getConnection()`, `TestService(connection)` | NO |
-| `run_agent_test` | `getConnection()`, connection APIs | NO |
-| `list_all_orgs` | `getAllowedOrgs()` (cache-based) | NO |
-| `get_username` | `getAllowedOrgs()`, `getDefaultTargetOrg()` | NO* |
-| `resume_tool_operation` | `getConnection()`, connection APIs | NO |
-| `create_org_snapshot` | `getConnection()`, `Org.create({ connection })` | NO |
-| `scan_apex_antipatterns` | `getConnection()` (optional) | NO |
-| `enrich_metadata` | `getConnection()`, `SfProject.resolve(input.directory)` | NO |
-
-*`get_username` calls `getDefaultTargetOrg()` which calls `ConfigAggregator.create()` — but that function needs to be fixed independently (see Wave 2 below).
-
-### Wave 2 — Needs fix in shared infrastructure before chdir can be removed
-
-| Tool | Blocker | Fix Required |
-|------|---------|--------------|
-| `deploy_metadata` | Uses `SfProject.resolve(input.directory)` + `SourceTracking.create({ project })` — both CWD-free; `process.chdir()` is vestigial | Remove chdir; already passes directory explicitly |
-| `retrieve_metadata` | Same as deploy_metadata | Remove chdir; already passes directory explicitly |
-
-These actually belong in Wave 1 — the code already passes `input.directory` to all API calls. The `process.chdir()` is pure legacy.
-
-### Wave 3 — Requires @salesforce/core internal change or workaround
-
-| Tool | Blocker | Notes |
-|------|---------|-------|
-| `create_scratch_org` | `scratchOrgCreate()` internally calls `ConfigAggregator.create()` without projectPath | Cannot be fixed without library change; must remain serialized or accept potential CWD race |
-
----
-
-## 4. ConfigAggregator.create() — The Critical Fix in auth.ts
-
-The `getDefaultConfig()` function in `packages/mcp/src/utils/auth.ts` is the shared infrastructure that must be fixed before removing chdir from any tool that calls `getDefaultTargetOrg()` or `getDefaultTargetDevHub()`:
-
-```ts
-// CURRENT (CWD-dependent — line 132)
-async function getDefaultConfig(property) {
-    await ConfigAggregator.clearInstance(process.cwd());
-    const aggregator = await ConfigAggregator.create();  // uses process.cwd() as key
-    // ...
-}
-
-// FIXED (CWD-free — accepts projectPath parameter)
-async function getDefaultConfig(
-    property: OrgConfigProperties.TARGET_ORG | OrgConfigProperties.TARGET_DEV_HUB,
-    projectPath: string,
-): Promise<OrgConfigInfo | undefined> {
-    await ConfigAggregator.clearInstance(projectPath);
-    const aggregator = await ConfigAggregator.create({ projectPath });
-    // ...
-}
-```
-
-**Caller impact:** `getDefaultTargetOrg()` and `getDefaultTargetDevHub()` must also accept and forward the `projectPath`. This flows up through `OrgService` interface and into the tools.
-
----
-
-## 5. MCP SDK Concurrency Model
-
-**Verdict:** The MCP SDK is concurrent by design. The Mutex is purely a workaround for `process.chdir()`.
-
-### How requests are dispatched (verified in SDK source)
-
-```js
-// shared/protocol.js _onrequest():
-Promise.resolve()
-    .then(() => handler(request, fullExtra))  // no queuing, no lock
-    .then((result) => { ... })
-```
-
-The SDK fires each tool handler as an independent promise. No built-in serialization exists.
-
-### Stdio transport
-
-```js
-// server/stdio.js processReadBuffer():
-while (true) {
-    const message = this._readBuffer.readMessage();
-    if (message === null) break;
-    this.onmessage?.(message);  // triggers _onrequest synchronously...
-}
-// ...but _onrequest wraps the handler in Promise.resolve().then()
-// so the handler runs in the next microtask tick, enabling interleaving
-```
-
-**Practical result:** Claude (the MCP client) can send multiple `tools/call` requests in rapid succession. The SDK processes each as a separate promise. Without the Mutex, two concurrent tools calling `process.chdir()` would race. Once all `process.chdir()` calls are removed, removing the Mutex enables true concurrent execution.
-
----
-
-## 6. Node.js Best Practice for CWD-Free Operation
-
-### The core problem: process.cwd() is global process state
-
-Node.js is single-threaded but async concurrent. `process.cwd()` is a process-level global. `process.chdir()` changes it for all concurrent async code, not just the current call stack.
-
-### Pattern 1: Pass explicit paths (primary approach)
-
-All APIs that accept a `path` parameter should receive it explicitly. Never default to `process.cwd()` in application code.
-
-```ts
-// Always pass directory explicitly
-const project = await SfProject.resolve(input.directory);
-const aggregator = await ConfigAggregator.create({ projectPath: input.directory });
-```
-
-### Pattern 2: Avoid chdir entirely in servers
-
-Long-running server processes should never call `process.chdir()`. It is safe only in short-lived CLI scripts where no concurrency exists. In an MCP server with concurrent tool handlers, it is a data race.
-
-### Pattern 3: Use absolute paths throughout
-
-All paths received from tool inputs should be validated as absolute (or resolved to absolute) before use. The existing `sanitizePath()` / `directoryParam` infrastructure already does this.
-
-### What NOT to do
-
-| Anti-pattern | Problem |
-|---|---|
-| `process.chdir()` in async handlers | Races with concurrent handlers sharing the same process |
-| `ConfigAggregator.create()` without `projectPath` | Uses `process.cwd()` as instance cache key — corrupted by chdir |
-| `SfProject.resolve()` without path argument | Falls back to `process.cwd()` |
-| `Org.create({ aliasOrUsername })` without pre-resolved connection | Calls `ConfigAggregator.create()` internally without projectPath |
-
----
-
-## 7. Removing the Mutex
-
-The `toolExecutionMutex` in `sf-mcp-server.ts` (line 85) can be removed once:
-
-1. All 14 tools have `process.chdir()` removed
-2. `auth.ts:getDefaultConfig()` is updated to accept explicit `projectPath`
-3. `create_scratch_org` is assessed (Wave 3) — its internal `scratchOrgCreate()` call is the only remaining risk
-
-**Removal is straightforward:** Replace line 230:
-```ts
-// BEFORE
-const result = await this.toolExecutionMutex.lock(() => cb(args as unknown as InputArgs, extra));
-
-// AFTER
-const result = await cb(args as unknown as InputArgs, extra);
-```
-
-The `Mutex` import from `@salesforce/core` can then be removed.
-
----
-
-## 8. SIGTERM Handler Bug
-
-The current handler in the server listens on `process.stdin` for `SIGTERM` instead of `process` itself. Fix:
-
-```ts
-// WRONG (process.stdin does not emit SIGTERM)
-process.stdin.on('SIGTERM', handler);
-
-// CORRECT
-process.on('SIGTERM', handler);
-```
+## Do NOT Add
+
+| Package | Reason to Exclude |
+|---------|-------------------|
+| `ajv` / `json-schema-typed` | SDK bundles its own JSON Schema validation for `outputSchema`; do not duplicate |
+| `zod-to-json-schema` | SDK bundles this internally (used for `inputSchema`/`outputSchema` → JSON Schema conversion) |
+| `express` / `hono` / SSE/StreamableHTTP transport | stdio only; out of scope per PROJECT.md |
+| `@modelcontextprotocol/sdk` v2.0.x alpha | Explicitly out of scope per PROJECT.md |
+| `winston` / `pino` | MCP logging uses the protocol's `sendLoggingMessage`; bridge through existing `@salesforce/core` Logger instead |
+| Any Zod v4 package | Project uses Zod v3; Zod v4 compat only relevant if upgrading SDK to 1.25+ |
 
 ---
 
 ## Sources
 
-- Verified in `packages/mcp/node_modules/@salesforce/core/lib/sfProject.js` lines 390–391 — `SfProject.resolve()` uses `process.cwd()` as default
-- Verified in `packages/mcp/node_modules/@salesforce/core/lib/config/configAggregator.js` lines 71–75 — `ConfigAggregator.create()` keyed on `options?.projectPath ?? process.cwd()`
-- Verified in `packages/mcp/node_modules/@salesforce/core/lib/org/org.js` lines 994–1025 — `Org.create({ connection })` skips ConfigAggregator; `Org.create({ aliasOrUsername })` triggers ConfigAggregator.create()
-- Verified in `packages/mcp/node_modules/@salesforce/core/lib/org/scratchOrgCreate.js` lines 91, 197 — internal `ConfigAggregator.create()` calls without projectPath
-- Verified in `packages/mcp/node_modules/@salesforce/source-tracking/lib/sourceTracking.js` line 97 — `SourceTracking` derives path from `project.getPath()`, not CWD
-- Verified in `packages/mcp/node_modules/@modelcontextprotocol/sdk/dist/cjs/shared/protocol.js` lines 133–168 — no serialization in request dispatch
-- Verified in `packages/mcp/node_modules/@modelcontextprotocol/sdk/dist/cjs/server/stdio.js` — `processReadBuffer()` calls `onmessage` in a while loop; handlers fire as independent promises
-- Verified in `packages/mcp/src/utils/auth.ts` lines 126–143 — `getDefaultConfig()` uses `process.cwd()` in both `clearInstance()` and `create()` calls
-
----
-
-*Stack research for: Salesforce MCP Server v1.1 — CWD elimination and parallel tool execution*
-*Researched: 2026-04-11*
+- SDK 1.18.2 type definitions and source: verified in `/packages/mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/`
+- SDK 1.29.0 type definitions: inspected via `npm pack @modelcontextprotocol/sdk@1.29.0` and tar extraction to `/tmp/sdk129/`
+- `@modelcontextprotocol/sdk` latest dist-tag `1.29.0` verified via `npm show @modelcontextprotocol/sdk dist-tags`
+- MCP Tools spec (structuredContent): https://modelcontextprotocol.io/specification/2025-11-25/server/tools
+- TypeScript SDK server docs: https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/server.md
+- Provider API source: `packages/mcp-provider-api/src/` (tools.ts, resources.ts, prompts.ts, provider.ts)
+- Server startup: `packages/mcp/src/index.ts` lines 177–193 (capabilities declaration)
+- SfMcpServer: `packages/mcp/src/sf-mcp-server.ts` (registerTool wrapper, calculateResponseCharCount)
+- Registry utils: `packages/mcp/src/utils/registry-utils.ts` (registerToolsets — no resource/prompt loop)

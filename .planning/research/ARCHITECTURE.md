@@ -1,417 +1,495 @@
 # Architecture Research
 
-**Domain:** MCP Server — chdir elimination and tool parallelism
+**Domain:** MCP Server — MCP Best Practices Alignment (v1.2)
 **Researched:** 2026-04-11
-**Confidence:** HIGH (based on direct codebase inspection)
+**Confidence:** HIGH (based on direct codebase inspection + MCP SDK docs)
 
-## Current Architecture
+---
 
-### System Overview
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                       index.ts (CLI entry)                    │
-│  resolveSymbolicOrgs() at startup → writes allowedOrgs cache │
-└──────────────────────────┬───────────────────────────────────┘
-                           │ constructs
-┌──────────────────────────▼───────────────────────────────────┐
-│                     SfMcpServer                               │
-│  registerTool() wraps every tool with:                        │
-│    1. Permission middleware (targetOrg resolution)            │
-│    2. Rate limiter check                                      │
-│    3. toolExecutionMutex.lock(cb)  ← global, serializes ALL  │
-│    4. Telemetry emit                                          │
-└──────────────────────────┬───────────────────────────────────┘
-                           │ invokes via provider registry
-┌──────────────────────────▼───────────────────────────────────┐
-│                   McpProvider layer                           │
-│  DxCoreMcpProvider    CodeAnalyzerMcpProvider   ...          │
-│  ScaleProductsMcpProvider  MetadataEnrichmentMcpProvider      │
-│  LwcExpertsMcpProvider (closed-source bundle)                │
-│  AuraExpertsMcpProvider (closed-source bundle)               │
-└──────────────────────────┬───────────────────────────────────┘
-                           │ provide McpTool instances
-┌──────────────────────────▼───────────────────────────────────┐
-│                      McpTool.exec()                           │
-│  14 tools call process.chdir(input.directory) here           │
-│  Then call @salesforce/core APIs that use process.cwd()      │
-└──────────────────────────────────────────────────────────────┘
-```
-
-### Component Responsibilities
-
-| Component | Responsibility | Location |
-|-----------|----------------|----------|
-| `SfMcpServer.registerTool()` | Middleware chain: auth, rate limit, mutex, telemetry | `packages/mcp/src/sf-mcp-server.ts` |
-| `toolExecutionMutex` | Serializes all 49 tool calls to prevent chdir race | `sf-mcp-server.ts` line 85 |
-| `getConnection()` | Resolves alias → username, creates AuthInfo/Connection | `packages/mcp/src/utils/auth.ts` |
-| `getDefaultConfig()` | Reads ConfigAggregator; uses `process.cwd()` at line 132 | `packages/mcp/src/utils/auth.ts` |
-| `McpTool.exec()` | Business logic; 14 tools call `process.chdir()` first | provider packages |
-| `directoryParam` | Zod schema for the `directory` tool input | `mcp-provider-dx-core/src/shared/params.ts` |
-| `MCP_PROVIDER_REGISTRY` | Static list of all provider instances | `packages/mcp/src/registry.ts` |
-
-## Tool Audit: chdir Classification
-
-### 14 Tools with process.chdir() (confirmed by direct inspection)
-
-| Tool | Package | What chdir enables | Can remove trivially? |
-|------|---------|--------------------|-----------------------|
-| `list_all_orgs` | dx-core | Not needed — calls `getAllowedOrgs()` only | YES (Wave 1) |
-| `delete_org` | dx-core | Not needed — uses explicit connection | YES (Wave 1) |
-| `run_soql_query` | dx-core | Not needed — uses explicit connection | YES (Wave 1) |
-| `open_org` | dx-core | Not needed — uses explicit connection | YES (Wave 1) |
-| `run_agent_test` | dx-core | Not needed — uses explicit connection | YES (Wave 1) |
-| `run_apex_test` | dx-core | Not needed — uses explicit connection | YES (Wave 1) |
-| `resume_tool_operation` | dx-core | Not needed — uses explicit connection | YES (Wave 1) |
-| `assign_permission_set` | dx-core | Not needed — uses explicit connection + StateAggregator | YES (Wave 1) |
-| `get_username` | dx-core | Unclear: calls `getDefaultTargetOrg()` which uses `process.cwd()` indirectly | NO (Wave 3) |
-| `create_org_snapshot` | dx-core | Not needed — uses explicit connection | YES (Wave 1) |
-| `create_scratch_org` | dx-core | Reads `definitionFile` path — file path is absolute | MAYBE (Wave 2) |
-| `deploy_metadata` | dx-core | Calls `SfProject.resolve(input.directory)` + `SourceTracking.create()` | PARTIAL (Wave 2) |
-| `retrieve_metadata` | dx-core | Calls `SfProject.resolve(input.directory)` + `SourceTracking.create()` | PARTIAL (Wave 2) |
-| `scan_apex_class_for_antipatterns` | scale-products | Not needed — uses explicit connection + explicit file path | YES (Wave 1) |
-| `enrich_metadata` | metadata-enrichment | Calls `SfProject.resolve(input.directory)` | PARTIAL (Wave 2) |
-
-**Note:** Only 14 tools confirmed above; the comment in PROJECT.md says "14 tools" which matches this count including `enrich_metadata`.
-
-### Key API Findings
-
-**`SfProject.resolve(path)`** — accepts an explicit directory path. If `path` is provided, it does NOT fall back to `process.cwd()`. Source: `@salesforce/core/lib/sfProject.js` line 391: `const resolvedPath = await this.resolveProjectPath(path ?? process.cwd())`.
-
-**`SourceTracking.create({ org, project })`** — takes `project: SfProject` which already holds the path. Does NOT independently read `process.cwd()` for project location. One internal check at `functions.js:163` compares `process.cwd() !== projectPath` to decide whether to use a `NodeFSTreeContainer`, but this is a web-platform workaround; on Node.js with an explicit projectPath the container is created correctly regardless.
-
-**`getDefaultConfig()` in auth.ts** — calls `ConfigAggregator.clearInstance(process.cwd())` at line 132. This IS a remaining `process.cwd()` dependency. Called only from `get_username` tool. After chdir removal, this needs the directory passed explicitly or the call redesigned.
-
-## Middleware Layer Changes
-
-### Current SfMcpServer.registerTool() flow
+## Existing Architecture Baseline (post-v1.1)
 
 ```
-incoming call
-  → permission check (targetOrg)
-  → rate limit check
-  → toolExecutionMutex.lock(cb)   // serializes everything
-      → tool.exec(args)           // 14 tools call process.chdir() here
-  → telemetry
-→ return result
+index.ts (CLI entry)
+  └─ new SfMcpServer(serverInfo, options)   // capabilities: { resources: {}, tools: {} }
+       └─ registerTool(name, config, cb)    // wraps cb with middleware chain:
+            1. Permission check (targetOrg)
+            2. Rate limit check
+            3. Serialized dispatch for lwc-experts (per-tool Mutex)
+            4. await cb(args, extra)         // McpTool.exec()
+            5. Telemetry emit
+       └─ registerToolsets() in registry-utils.ts
+            └─ McpProvider[] from registry.ts
+                 └─ provideTools(services) → McpTool[]  (all 8 providers)
 ```
 
-### Post-chdir-removal SfMcpServer.registerTool() flow
+`McpResource`, `McpResourceTemplate`, and `McpPrompt` base classes exist in `mcp-provider-api` and `McpProvider.provideResources()` / `providePrompts()` are stubbed, but neither `registerToolsets()` nor any other path in `index.ts` or `registry-utils.ts` calls them. Resources and prompts are defined in the API contract but wired to nothing.
 
-```
-incoming call
-  → permission check (targetOrg)
-  → rate limit check
-  → tool.exec(args)               // no chdir, no mutex needed
-  → telemetry
-→ return result
-```
+Logging capability (`logging: {}`) is absent from the capabilities object passed to `new SfMcpServer()`. The inner `this.server` (an `@modelcontextprotocol/sdk` `Server` instance) is accessible inside `SfMcpServer` and is the object that exposes `sendLoggingMessage()`.
 
-**The Mutex must NOT be removed until every tool that calls `process.chdir()` is fixed.** This includes the external providers (see below). The three-wave incremental approach lets you remove the mutex only in Wave 3, after all waves complete.
+---
 
-### Mutex Replacement Strategy
+## Feature Integration Map
 
-The Mutex is global because `process.cwd()` is global. There is no case for per-org or per-tool mutexes — the shared state is the entire process's working directory, not per-org state. The correct replacement is no mutex at all.
+### 1. Tool Annotations (Completion)
 
-**Decision: fully remove `toolExecutionMutex` after Wave 3 completes.** No per-tool or per-org variants are needed because:
+**What is incomplete:**
+- `create_org_snapshot`, `delete_org`, `create_scratch_org` — `annotations: {}` (empty)
+- All devops tools except `sfDevopsCreateWorkItem` and `sfDevopsUpdateWorkItemStatus` — no `annotations` key at all (10 of 12 tools)
+- Most tools missing `idempotentHint` entirely; `destructiveHint` set on only 4 tools
 
-1. Tools using explicit paths have no shared mutable state.
-2. Org connections are independently established per-call via AuthInfo (no shared connection pool).
-3. The `ConfigAggregator` singleton in `getDefaultConfig()` is the only remaining shared-state concern, and it is only called from `get_username` (Wave 3).
+**Where annotations live:** `McpTool.getConfig()` returns `McpToolConfig.annotations?: ToolAnnotations`. This flows to `server.registerTool(name, config, cb)` unchanged — `SfMcpServer.registerTool()` passes `config` through to `McpServer.prototype.registerTool.call()` at line 274 of `sf-mcp-server.ts`. No middleware touches `annotations`.
 
-## External Provider Handling
+**Integration point:** Each provider package's individual tool files. No changes to `SfMcpServer`, `McpTool`, or `mcp-provider-api` needed.
 
-### lwc-experts (closed-source)
+**Rule for all four hints:**
+| Hint | Meaning | Guidance |
+|------|---------|---------|
+| `readOnlyHint` | Tool makes no writes to external state | All query/list/read/test tools |
+| `destructiveHint` | Side effects may be irreversible | delete, deploy with overwrite |
+| `idempotentHint` | Safe to call multiple times with same args | Queries, retrieves, read tools |
+| `openWorldHint` | Tool accesses entities beyond what the server knows about | Default `true` for most; `false` when output is bounded |
 
-**Confirmed:** `index.bundle.js` contains **2 calls** to `process.chdir(e.directory)`.
+**Build effort:** Per-tool annotation review. No architectural change.
 
-**Strategy: keep the Mutex active for lwc-experts tools only until a new package version is released.** This can be done by introducing a per-tool `requiresMutex` annotation, OR by wrapping only lwc-experts tool callbacks in the mutex after removing the global mutex. The cleaner approach is the `requiresMutex` flag on `McpTool`:
+---
+
+### 2. Error Messages with Recovery Guidance
+
+**Current pattern:** `textResponse(err.message, true)` — plain error strings. The only exception is `deploy_metadata` which already embeds LLM instructions in the timeout error path.
+
+**Where to change:** Inside each `McpTool.exec()` catch block. The response shape is unchanged (`CallToolResult` with `isError: true, content: [{ type: 'text', text }]`). The text content gains structured guidance.
+
+**Where NOT to change:** `SfMcpServer.registerTool()` middleware error returns (permission denied, rate limit) are not tool errors — they are infrastructure errors that don't benefit from Salesforce-specific recovery hints.
+
+**Recommended shared helper location:** `mcp-provider-api` (or a new `packages/mcp-provider-api/src/errors.ts`). A `toolError(message, recovery)` factory consolidates the pattern:
 
 ```typescript
-// In McpTool base class (mcp-provider-api):
-requiresMutex(): boolean { return false; }  // default: no mutex
-
-// In SfMcpServer.registerTool():
-if (tool.requiresMutex?.()) {
-  result = await this.toolExecutionMutex.lock(() => cb(args, extra));
-} else {
-  result = await cb(args, extra);
+// mcp-provider-api/src/errors.ts
+export function toolError(message: string, recovery?: string): CallToolResult {
+  const text = recovery ? `${message}\n\nRecovery: ${recovery}` : message;
+  return { isError: true, content: [{ type: 'text', text }] };
 }
 ```
 
-Since lwc-experts is closed-source, you cannot add `requiresMutex()` to it. Instead, use a static allowlist in `SfMcpServer` of tool names that require serialization. When the closed-source provider ships chdir-free, remove those names from the list.
+All 8 provider packages import from `mcp-provider-api` already; adding this export is non-breaking.
 
-**Practical option:** The Mutex wrapper can be moved to a per-provider level — wrap only the LwcExpertsMcpProvider's tool registrations in the mutex. The registry already knows which provider each tool comes from. This keeps the mutex narrowly scoped without modifying closed-source code.
+**Integration point:** `mcp-provider-api/src/errors.ts` (new file, exported from `index.ts`) + per-tool catch blocks.
 
-### aura-experts (closed-source)
+---
 
-**Confirmed:** `index.bundle.js` has **0 calls** to `process.chdir()` and **4 calls** to `process.cwd()` — but these are from bundled third-party dependencies (dotenv path resolution), not from tool execution logic. The `index.bundle.d.ts` has no `directory` input field.
+### 3. Structured Output (structuredContent)
 
-**Strategy: aura-experts requires no special handling.** It is not a chdir user. It can run in parallel immediately after the global Mutex is removed.
+**How the SDK wires it:** When `McpToolConfig.outputSchema` is a non-undefined Zod shape, `McpServer.registerTool()` validates `result.structuredContent` against that schema before returning to the client. `SfMcpServer.calculateResponseCharCount()` already handles `structuredContent` (added speculatively at v1.1).
 
-## Architecture Patterns
-
-### Pattern 1: Explicit Path Threading
-
-**What:** Pass `input.directory` (an absolute path already validated by `directoryParam`/`sanitizePath`) directly to all APIs that previously relied on `process.cwd()`.
-
-**When to use:** Wave 1 and Wave 2 tools.
-
-**Example for Wave 2 (deploy/retrieve):**
+**Correct TypeScript pattern (MEDIUM confidence — from SDK docs):**
 ```typescript
-// Before:
-process.chdir(input.directory);
-const project = await SfProject.resolve();  // falls back to process.cwd()
+// Use type alias, not interface, for structuredContent assignability
+type OrgListOutput = { orgs: Array<{ alias: string; username: string; instanceUrl: string }> };
 
-// After:
-const project = await SfProject.resolve(input.directory);  // explicit — no chdir needed
+getConfig(): McpToolConfig<InputShape, { orgs: z.ZodArray<...> }> {
+  return {
+    outputSchema: { orgs: z.array(z.object({ alias: z.string(), ... })) },
+    ...
+  };
+}
+
+async exec(): Promise<CallToolResult> {
+  const output: OrgListOutput = { orgs: [...] };
+  return {
+    content: [{ type: 'text', text: JSON.stringify(output) }],  // backward compat
+    structuredContent: output,
+  };
+}
 ```
 
-**Example for Wave 1 (connection-only tools):**
-```typescript
-// Before:
-process.chdir(input.directory);
-const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
+**Where to add it:** `McpTool.getConfig()` output already accepts `outputSchema?: OutputArgsShape`. Tools just need to populate it and return `structuredContent` alongside `content`.
 
-// After:
-const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
-// directory param can be removed from the schema entirely for Wave 1 tools
-// OR kept but ignored (non-breaking change)
+**Priority tools** (structured output pays off most where output is consumed programmatically):
+- `salesforce_get_org_info` — already returns structured JSON stringified as text; trivial to add `structuredContent`
+- `run_soql_query` — returns SOQL result as JSON string; schema can mirror `QueryResult<T>` shape
+- `list_all_orgs` — same pattern as `salesforce_get_org_info`
+- `salesforce_describe_object` — returns field descriptions
+
+**Integration point:** Per-tool `getConfig()` and `exec()`. No changes to `SfMcpServer` or `McpTool` base class.
+
+---
+
+### 4. MCP Resources
+
+**Current state:** `McpResource` and `McpResourceTemplate` classes exist in `mcp-provider-api/src/resources.ts`. `McpProvider.provideResources()` is stubbed. Nothing wires them to the server.
+
+**What needs to be added:**
+
+In `registry-utils.ts`, `createToolRegistryFromProviders()` calls only `provider.provideTools()`. A parallel `createResourceRegistryFromProviders()` (or extending the existing function) must call `provider.provideResources()` and register each result with the server.
+
+**Server registration API (HIGH confidence — SDK docs):**
+```typescript
+// For McpResource (static URI):
+server.resource(name, uri, config, readCallback);
+
+// For McpResourceTemplate (dynamic URI pattern):
+server.resource(name, resourceTemplate, config, readCallback);
 ```
 
-The safer non-breaking change is to keep the `directory` param in the schema (existing agents already send it) but simply not use it.
+`SfMcpServer` extends `McpServer`, so these methods are available as `this.resource()` inside `SfMcpServer`, or called from outside as `server.resource(...)`.
 
-### Pattern 2: Staged Mutex Removal
+**Capability flag:** The `index.ts` startup already passes `capabilities: { resources: {} }` — the capability is already declared. No change needed there.
 
-**What:** Remove the global `toolExecutionMutex` after all open-source tools are clean; retain a targeted mutex only for closed-source tools.
+**Where resources should be implemented:**
+- `salesforce://orgs` — static resource listing all authorized orgs with permission levels. Lives in `mcp-provider-dx-core` (it has access to `OrgService`)
+- `salesforce://permissions` — current org permission map. Lives in `mcp-provider-dx-core`
+- `salesforce://connection-status` — connection health. Lives in `mcp-provider-dx-core`
 
-**When to use:** After Wave 3, before closing out the milestone.
+**Registration wiring path:**
 
-**Example:**
-```typescript
-// In SfMcpServer — after global mutex is removed:
-private readonly mutexRequiredTools = new Set<string>([
-  // names of lwc-experts tools that still use chdir internally
-  // populated from a constant or config
-]);
-
-// In wrappedCb:
-const needsMutex = this.mutexRequiredTools.has(name);
-const result = needsMutex
-  ? await this.toolExecutionMutex.lock(() => cb(args, extra))
-  : await cb(args, extra);
+```
+registry-utils.ts: registerToolsets()
+  └─ calls registerResourcesFromProviders() [NEW]
+       └─ for each provider: provider.provideResources(services)
+            └─ for each McpResource: server.resource(r.getName(), r.getUri(), r.getConfig(), r.read)
+            └─ for each McpResourceTemplate: server.resource(r.getName(), r.getTemplate(), r.getConfig(), r.read)
 ```
 
-### Pattern 3: Consolidating Shared Params
+`SfMcpServer` does not need to wrap resource reads with middleware (no `targetOrg` injection needed — resources are read-only and org context is baked into the resource URI design). Permission checks for sensitive resource data should be done inside the resource's `read()` implementation.
 
-**What:** Move `directoryParam`, `usernameOrAliasParam`, and `sanitizePath` from `mcp-provider-dx-core/src/shared/params.ts` to `mcp-provider-api`.
+**Integration points:**
+- `registry-utils.ts` — add resource registration loop
+- `mcp-provider-dx-core` — implement 2-3 concrete `McpResource` subclasses
+- Comment in `McpProvider.provideResources()` and `McpResource` must be updated to remove "NOT CONSUMED YET" note
 
-**When to use:** At the start of this milestone (prerequisite for Wave 1 changes in scale-products and metadata-enrichment, which currently duplicate these params from their own `shared/params.ts` files).
+---
 
-**Impact:** Only additive — existing imports in dx-core can keep working via re-export. New providers import from the API package directly.
+### 5. MCP Prompts
 
-### Pattern 4: ConfigAggregator Without CWD (Wave 3)
+**Current state:** `McpPrompt` class exists in `mcp-provider-api/src/prompts.ts`. `McpProvider.providePrompts()` is stubbed. Nothing wires them to the server.
 
-**What:** `getDefaultConfig()` in `auth.ts` calls `ConfigAggregator.clearInstance(process.cwd())` before creating a new aggregator. After chdir removal, `process.cwd()` here will always return the server start directory, which may no longer reflect the user's project.
+**Server registration API (HIGH confidence — SDK docs):**
+```typescript
+server.registerPrompt(name, config, promptCallback);
+// config shape: { title?, description?, argsSchema?: ZodObject }
+```
 
-**Resolution options:**
-1. Accept the behavior: `get_username` only reads global/local config; after org resolution at startup this function is rarely called with directory sensitivity.
-2. Thread the directory through: add a `directory` parameter to `getDefaultConfig()` / `getDefaultTargetOrg()` / `getDefaultTargetDevHub()` and call `ConfigAggregator.clearInstance(directory)` instead.
-3. Eliminate `getDefaultConfig()` entirely — after startup org resolution, the target org is already known; `get_username` can read from the startup cache instead.
+`prompts` capability is NOT currently in the capabilities object at `index.ts:181`. Must add `prompts: {}` alongside `resources: {}` and `tools: {}`.
 
-Option 3 is the cleanest and aligns with the v1.0 Phase 1 decision (resolve orgs at startup). Option 2 is the safer incremental step.
+**Registration wiring path:**
+```
+registry-utils.ts: registerToolsets()
+  └─ calls registerPromptsFromProviders() [NEW]
+       └─ for each provider: provider.providePrompts(services)
+            └─ for each McpPrompt: server.prompt(p.getName(), p.getConfig(), (...args) => p.prompt(...args))
+```
+
+**Where prompts should be implemented:**
+- `deploy-metadata-workflow` — structured prompt for "deploy changed files to org X" with pre-flight checklist. Lives in `mcp-provider-dx-core`
+- `org-setup-checklist` — prompt to guide setting up a scratch org. Lives in `mcp-provider-dx-core`
+- `soql-query-builder` — guided SOQL construction. Lives in `mcp-provider-dx-core`
+
+**Integration points:**
+- `index.ts` — add `prompts: {}` to capabilities object
+- `registry-utils.ts` — add prompt registration loop
+- `mcp-provider-dx-core` — implement 2-3 concrete `McpPrompt` subclasses
+- Comment in `McpProvider.providePrompts()` must be updated
+
+---
+
+### 6. Protocol-Level Logging
+
+**SDK API (MEDIUM confidence — from SDK docs and GitHub issues):**
+
+`McpServer` exposes `server.sendLoggingMessage()` (where `server` is the inner `Server` instance accessible as `this.server` inside `SfMcpServer`). The `McpServer`-level convenience wrapper may be `this.sendLoggingMessage()` — needs verification. The inner `this.server.sendLoggingMessage({ level, data })` is confirmed available.
+
+**Capability declaration required:** Add `logging: {}` to the capabilities object in `index.ts`:
+```typescript
+capabilities: {
+  resources: {},
+  prompts: {},   // add for prompts
+  tools: {},
+  logging: {},   // add for logging
+}
+```
+
+**How logging/setLevel works:** When a connected client sends a `logging/setLevel` request, the SDK's `McpServer` handles it automatically — it tracks the minimum level and suppresses `sendLoggingMessage()` calls below that level. The server does not need to implement a `setRequestHandler` for this.
+
+**Integration into SfMcpServer:**
+
+The `Telemetry` class is the internal observability sink. MCP logging is the external protocol-level sink for the client. They serve different purposes and both should coexist.
+
+Two places to wire MCP logging:
+
+1. **In `SfMcpServer.registerTool()` middleware** — emit `notifications/message` for tool call start/end/error at appropriate levels:
+   ```typescript
+   // Add to SfMcpServer:
+   private sendLog(level: LoggingLevel, data: unknown): void {
+     try {
+       this.server.sendLoggingMessage({ level, data });
+     } catch { /* never fail a tool call over logging */ }
+   }
+   ```
+
+2. **In `Telemetry`'s silent catch blocks** — currently `sendEvent()` and `sendPdpEvent()` have empty catch blocks. The `catch` should emit an MCP `warning` log via `sendLoggingMessage` so clients see telemetry failures without crashing.
+
+**Critical constraint:** `sendLoggingMessage()` must be called only AFTER `server.connect(transport)` — the transport must be established first. In `SfMcpServer`, the `connect()` call happens in `index.ts` after construction. Logging calls inside `registerTool()` callbacks are safe (they run post-connect). Logging calls in the constructor would not be.
+
+**`Logger` (from `@salesforce/core`) already exists** as `this.logger = Logger.childFromRoot('mcp-server')` in `SfMcpServer`. This logger writes to Salesforce's own log infrastructure (not MCP protocol). MCP protocol logging is additive — route significant events to both.
+
+**Integration points:**
+- `index.ts` — add `logging: {}` to capabilities
+- `SfMcpServer` — add `sendLog()` private method; call it in middleware at tool-start, tool-end, tool-error
+- `telemetry.ts` — replace empty catch blocks with `sendLog('warning', ...)` forwarding
+
+---
+
+## Component Responsibilities After v1.2
+
+| Component | Current Responsibility | v1.2 Change |
+|-----------|----------------------|-------------|
+| `SfMcpServer.registerTool()` | Auth, rate limit, telemetry middleware | Add `sendLog()` calls for tool lifecycle |
+| `SfMcpServer` constructor | Build server, declare capabilities | Add `logging: {}` to capabilities |
+| `index.ts` | Start server, register toolsets | Add `prompts: {}` to capabilities; call resource/prompt registration |
+| `registry-utils.ts` | Register tools from providers | Add `registerResourcesFromProviders()` and `registerPromptsFromProviders()` |
+| `McpTool.getConfig()` | Return tool config with annotations | Complete `annotations` in all tools; add `outputSchema` for priority tools |
+| `McpTool.exec()` | Execute tool logic; return `CallToolResult` | Return `structuredContent` alongside `content` for priority tools |
+| `McpProvider.provideResources()` | Stub returning `[]` | Override in `DxCoreMcpProvider` to return org/permissions resources |
+| `McpProvider.providePrompts()` | Stub returning `[]` | Override in `DxCoreMcpProvider` to return workflow prompts |
+| `mcp-provider-api/src/errors.ts` | Does not exist | New file: `toolError()` factory for structured error messages |
+| `telemetry.ts` | Silent catch blocks | Forward telemetry failures to MCP logging |
+
+---
+
+## New Components (create from scratch)
+
+| File | Package | Purpose |
+|------|---------|---------|
+| `mcp-provider-api/src/errors.ts` | `mcp-provider-api` | `toolError(message, recovery?)` factory; export from index |
+| `mcp-provider-dx-core/src/resources/org_info_resource.ts` | `mcp-provider-dx-core` | `McpResource` for `salesforce://orgs` |
+| `mcp-provider-dx-core/src/resources/permissions_resource.ts` | `mcp-provider-dx-core` | `McpResource` for `salesforce://permissions` |
+| `mcp-provider-dx-core/src/prompts/deploy_workflow_prompt.ts` | `mcp-provider-dx-core` | `McpPrompt` for deploy workflow |
+| `mcp-provider-dx-core/src/prompts/soql_builder_prompt.ts` | `mcp-provider-dx-core` | `McpPrompt` for SOQL query building |
+
+---
+
+## Modified Components (existing files changed)
+
+| File | Change Type | What Changes |
+|------|-------------|-------------|
+| `packages/mcp/src/index.ts` | Modify | Add `prompts: {}` and `logging: {}` to capabilities; call resource/prompt registration |
+| `packages/mcp/src/sf-mcp-server.ts` | Modify | Add `sendLog()` private method; emit logs in `registerTool()` middleware |
+| `packages/mcp/src/telemetry.ts` | Modify | Replace empty catch blocks with MCP log forwarding |
+| `packages/mcp/src/utils/registry-utils.ts` | Modify | Add resource and prompt registration loops |
+| `packages/mcp-provider-api/src/resources.ts` | Modify | Remove "NOT CONSUMED YET" note |
+| `packages/mcp-provider-api/src/prompts.ts` | Modify | Remove "NOT CONSUMED YET" note |
+| `packages/mcp-provider-api/src/provider.ts` | Modify | Remove "NOT CONSUMED YET" notes |
+| `packages/mcp-provider-api/src/index.ts` | Modify | Export `toolError` from new errors.ts |
+| `packages/mcp-provider-dx-core/src/index.ts` | Modify | Export new resource and prompt classes from `DxCoreMcpProvider.provideResources()` and `providePrompts()` |
+| All provider tool files with `annotations: {}` or missing annotations | Modify | Fill in all four annotation hints |
+| Priority tool files (get_org_info, run_soql_query, etc.) | Modify | Add `outputSchema` and `structuredContent` return |
+
+---
 
 ## Data Flow Changes
 
-### Before (Serialized, CWD-dependent)
+### Resource Read Flow (new)
 
 ```
-Tool A called           Tool B called (queued, waiting for Mutex)
-    ↓
-Mutex.lock()
-    ↓
-process.chdir("/project/A")
-    ↓
-SfProject.resolve()   — reads process.cwd() → "/project/A"
-SourceTracking.create() — reads process.cwd() → "/project/A"
-    ↓
-Mutex.unlock()
-    ↓           ← Tool B executes HERE, CWD still "/project/A" or changed
+Client: resources/read request for "salesforce://orgs"
+  └─ McpServer SDK routes to registered handler
+       └─ OrgInfoResource.read(uri, extra)
+            └─ services.getOrgService().getAllowedOrgs()
+            └─ returns ReadResourceResult { contents: [{ uri, text: JSON }] }
 ```
 
-### After (Parallel, Path-explicit)
+No middleware wrapping. Resource handlers are not wrapped by `SfMcpServer.registerTool()`.
+
+### Prompt Get Flow (new)
 
 ```
-Tool A called           Tool B called (runs concurrently)
-    ↓                       ↓
-SfProject.resolve("/project/A")    SfProject.resolve("/project/B")
-SourceTracking.create(projectA)    SourceTracking.create(projectB)
-    ↓                       ↓
-Return independently            Return independently
+Client: prompts/get request for "deploy-metadata-workflow"
+  └─ McpServer SDK routes to registered handler
+       └─ DeployWorkflowPrompt.prompt(args, extra)
+            └─ returns GetPromptResult { messages: [...] }
 ```
 
-No shared mutable state between tool executions. Org connections are per-call. SfProject instances are memoized per resolved path (safe for concurrent reads).
+No middleware wrapping. Prompt handlers receive no org context injection.
 
-## Recommended Project Structure Changes
+### Tool Call Flow (modified for logging)
 
 ```
-packages/
-├── mcp-provider-api/src/
-│   ├── tools.ts           # McpTool base class — add requiresMutex() stub if needed
-│   └── params.ts          # NEW: consolidated directoryParam, usernameOrAliasParam, sanitizePath
-│
-├── mcp/src/
-│   ├── sf-mcp-server.ts   # Remove global mutex OR scope to mutexRequiredTools set
-│   └── utils/
-│       ├── auth.ts        # Fix getDefaultConfig() process.cwd() usage (Wave 3)
-│       └── tool-categories.ts  # Fill in missing tool classifications
-│
-├── mcp-provider-dx-core/src/
-│   ├── shared/params.ts   # Re-export from mcp-provider-api (backward compat)
-│   └── tools/             # 13 tools: remove process.chdir(), update SfProject.resolve() calls
-│
-├── mcp-provider-scale-products/src/
-│   └── tools/scan-apex-antipatterns-tool.ts  # Remove process.chdir() (Wave 1)
-│
-└── mcp-provider-metadata-enrichment/src/
-    └── tools/enrich_metadata.ts  # Update SfProject.resolve(input.directory) (Wave 2)
+Client: tools/call
+  └─ SfMcpServer.registerTool() wrappedCb
+       └─ sendLog('debug', `Tool ${name} called`)    [NEW]
+       └─ Permission check
+       └─ Rate limit check
+       └─ McpTool.exec(args)
+            └─ return { content, structuredContent }  [structuredContent: NEW]
+       └─ sendLog('info'|'error', ...)               [NEW]
+       └─ Telemetry emit
+       └─ return result
 ```
+
+### Error Response Flow (modified for recovery guidance)
+
+```
+McpTool.exec() catch block
+  └─ toolError(err.message, 'Try X to recover')  [NEW factory from mcp-provider-api]
+       └─ { isError: true, content: [{ type: 'text', text: 'Error...\n\nRecovery: ...' }] }
+```
+
+---
 
 ## Suggested Build Order
 
-### Phase 0 — Prerequisite: Consolidate shared params (1-2 days)
+Dependencies drive this order. The `logging` capability and `sendLog()` method are independent and can be done first. Annotations are also independent. Resources and Prompts both require `registry-utils.ts` changes and should be sequenced after the wiring is in place.
 
-**Why first:** scale-products and metadata-enrichment both have their own `shared/params.ts` copies. Moving `directoryParam` and `sanitizePath` to `mcp-provider-api` before Wave 1 ensures changes are made once, not per-package.
+### Phase A — Annotations + Error Recovery (no infrastructure changes)
 
-- Add `params.ts` to `mcp-provider-api`
-- Re-export from existing `mcp-provider-dx-core/src/shared/params.ts` (no break)
-- Complete `tool-categories.ts` missing classifications (unblocks permission middleware correctness)
-- Fix SIGTERM handler bug (`process.stdin` → `process`) — standalone, no dependencies
+**Rationale:** Pure leaf changes. No new files, no wiring. Can be done with zero risk of breaking existing behavior. Unblocks everything else by getting the "simple" work out first.
 
-### Phase 1 — Wave 1: Trivially remove chdir (3-4 days)
+1. Fill in all empty/missing `annotations` in all provider packages (10 devops tools, 3 dx-core tools)
+2. Add `idempotentHint` and complete `destructiveHint` where missing across all providers
+3. Add `mcp-provider-api/src/errors.ts` with `toolError()` factory; export from `index.ts`
+4. Update priority tools to use `toolError()` with recovery hints in catch blocks
 
-**Candidates (all in dx-core unless noted):**
-- `list_all_orgs` — remove chdir, optionally remove `directory` from schema
-- `delete_org` — remove chdir
-- `run_soql_query` — remove chdir
-- `open_org` — remove chdir
-- `run_agent_test` — remove chdir
-- `run_apex_test` — remove chdir (connection-only, no SfProject needed)
-- `resume_tool_operation` — remove chdir
-- `assign_permission_set` — remove chdir
-- `create_org_snapshot` — remove chdir
-- `scan_apex_class_for_antipatterns` (scale-products) — remove chdir
+**No changes to:** `SfMcpServer`, `registry-utils.ts`, `index.ts`, `McpTool` base class
 
-**At end of Wave 1:** all 10 tools confirmed chdir-free. Mutex still active.
+---
 
-**Testing:** Run existing test suite + verify tools still work with concurrent calls.
+### Phase B — Structured Output (tool-local, no wiring changes)
 
-### Phase 2 — Wave 2: SfProject.resolve() path threading (2-3 days)
+**Rationale:** `outputSchema` and `structuredContent` live entirely within each tool. The infrastructure (`calculateResponseCharCount` in `SfMcpServer`) already handles `structuredContent`. Safe to do independently of Resources/Prompts/Logging.
 
-**Candidates:**
-- `deploy_metadata` — change `SfProject.resolve()` → `SfProject.resolve(input.directory)`, remove chdir
-- `retrieve_metadata` — same pattern
-- `enrich_metadata` (metadata-enrichment) — same pattern
-- `create_scratch_org` — remove chdir; reads `definitionFile` as an absolute path already, no SfProject needed
+1. Add `outputSchema` to `getConfig()` in priority tools (get_org_info, run_soql_query, list_all_orgs)
+2. Return `structuredContent` alongside existing `content` in `exec()` for those tools
+3. Verify `calculateResponseCharCount` handles structured output correctly (already does — see sf-mcp-server.ts lines 296–312)
 
-**Verify for each:** confirm `SourceTracking.create({ org, project })` receives an `SfProject` instance resolved from explicit path. The `NodeFSTreeContainer` branch in source-tracking is a web-only concern; no special handling needed on Node.js.
+**No changes to:** `SfMcpServer.registerTool()` middleware, `McpTool` base class, `registry-utils.ts`
 
-**At end of Wave 2:** all open-source tools are chdir-free. Mutex still active (lwc-experts still uses chdir).
+---
 
-### Phase 3 — Wave 3: Remaining CWD dependencies + Mutex removal (2-3 days)
+### Phase C — Protocol-Level Logging
 
-- `get_username` — fix `getDefaultConfig()` in `auth.ts`:
-  - Option A (recommended): thread `directory` through to `ConfigAggregator.clearInstance(directory)`
-  - Option B (bolder): remove `getDefaultConfig()` and read from startup cache
-- Remove `toolExecutionMutex` global lock from `SfMcpServer.registerTool()`
-- Add targeted mutex for lwc-experts tools (static tool name allowlist in SfMcpServer)
-- Verify parallel execution: run multiple tool calls concurrently in integration tests
+**Rationale:** Infrastructure change to `SfMcpServer` and `index.ts`. Must be done before Resources/Prompts to ensure logging works during those operations, but can be done before or after Phase A/B.
 
-**At end of Wave 3:** milestone complete. 49 tools can execute in parallel (except lwc-experts, which remains serialized until the closed-source package is updated).
+1. Add `logging: {}` to capabilities in `index.ts`
+2. Add `sendLog()` private method to `SfMcpServer`
+3. Add log calls in `registerTool()` wrappedCb for tool lifecycle events
+4. Replace empty catch blocks in `telemetry.ts` with `sendLog('warning', ...)` forwarding
+
+**Dependency:** Phases A and B are independent; Phase C is independent of both
+
+---
+
+### Phase D — MCP Resources
+
+**Rationale:** Requires both new resource implementations AND wiring in `registry-utils.ts`. Wire last so implementation is in place before the wiring test.
+
+1. Implement `OrgInfoResource` and `PermissionsResource` in `mcp-provider-dx-core/src/resources/`
+2. Override `DxCoreMcpProvider.provideResources()` to return them
+3. Add `registerResourcesFromProviders()` to `registry-utils.ts`
+4. Call it from `registerToolsets()` in `index.ts` flow
+5. Remove "NOT CONSUMED YET" comments from `mcp-provider-api`
+
+**Dependency:** Phase C (logging) should be complete so resource registration is logged
+
+---
+
+### Phase E — MCP Prompts
+
+**Rationale:** Same pattern as Resources. Requires both prompt implementations AND wiring. Add `prompts: {}` to capabilities first.
+
+1. Add `prompts: {}` to capabilities in `index.ts`
+2. Implement `DeployWorkflowPrompt` and `SoqlBuilderPrompt` in `mcp-provider-dx-core/src/prompts/`
+3. Override `DxCoreMcpProvider.providePrompts()` to return them
+4. Add `registerPromptsFromProviders()` to `registry-utils.ts`
+5. Call it from `registerToolsets()` in `index.ts` flow
+6. Remove "NOT CONSUMED YET" comments from `mcp-provider-api`
+
+**Dependency:** Phase D (resources wiring is the same pattern; learn from it)
+
+---
 
 ### Dependency Graph
 
 ```
-Phase 0 (params consolidation)
-    ↓
-Phase 1 (Wave 1 — trivial chdir removal)
-    ↓
-Phase 2 (Wave 2 — SfProject path threading)
-    ↓
-Phase 3 (Wave 3 — CWD cleanup + Mutex removal)
+Phase A (Annotations + Error Recovery)  ←─ no dependencies
+Phase B (Structured Output)              ←─ no dependencies
+Phase C (Logging)                        ←─ no dependencies
+Phase D (Resources)                      ←─ Phase C (recommended)
+Phase E (Prompts)                        ←─ Phase D (same wiring pattern)
 ```
 
-Phases 1 and 2 are independent of each other within their scope — individual tool fixes can be done in parallel by different contributors. Phase 3 must follow Phases 1 and 2 because the Mutex should only be removed after all open-source tools are chdir-free.
+A, B, C are fully parallelizable. D depends on nothing strictly (the SDK will work without logging), but logging makes resource registration observable. E depends on D's wiring pattern being established.
 
-## Integration Points
+---
 
-### SfMcpServer ↔ McpTool (primary change point)
+## Anti-Patterns to Avoid
 
-The `wrappedCb` in `registerTool()` currently puts `toolExecutionMutex.lock()` around every `cb()` call (line 230). After removal, the call is simply `await cb(args, extra)`. The rest of the middleware (permission check, rate limit, telemetry) is unaffected and continues to work correctly with parallel execution — none of those paths modify process state.
+### Anti-Pattern 1: Wrapping Resources/Prompts with Tool Middleware
 
-### McpTool ↔ @salesforce/core APIs
+**What goes wrong:** Applying `targetOrg` injection and permission middleware (from `registerTool()`) to resource or prompt registration.
 
-| API | Current dependency on CWD | After fix |
-|-----|--------------------------|-----------|
-| `SfProject.resolve()` | Falls back to `process.cwd()` if no arg | Pass `input.directory` explicitly |
-| `SourceTracking.create()` | Receives `SfProject` with embedded path; does not call `process.cwd()` independently in the relevant code path | No change needed |
-| `ConfigAggregator.create()` | Reads project config files starting from `process.cwd()` | Fix in Wave 3: pass explicit directory |
-| `AuthInfo.create()` / `Connection.create()` | Does not use `process.cwd()` | No change |
-| `Org.create()` | Does not use `process.cwd()` | No change |
+**Why it's wrong:** Resources and prompts use different SDK registration methods and different handler signatures. The tool middleware is designed for `CallToolResult` callbacks. Org context for resources should be encoded in the resource URI design (e.g., `salesforce://orgs` reads from the startup-resolved allowlist, not from a per-request `targetOrg`).
 
-### External Providers ↔ SfMcpServer
+**Do this instead:** Register resources and prompts directly via `server.resource()` / `server.registerPrompt()` without wrapping in middleware. Put any access control logic inside the resource/prompt handler itself.
 
-| Provider | chdir in bundle | Strategy |
-|----------|-----------------|----------|
-| lwc-experts | YES — 2 calls to `process.chdir(e.directory)` | Retain mutex scoped to lwc-experts tool names |
-| aura-experts | NO — 4 `process.cwd()` calls are in bundled dotenv, not tool logic | No mutex needed; runs in parallel |
+---
 
-## Anti-Patterns
+### Anti-Pattern 2: Logging Before connect()
 
-### Anti-Pattern 1: Removing the Mutex Before All chdir Calls Are Eliminated
+**What goes wrong:** Calling `this.server.sendLoggingMessage()` in `SfMcpServer`'s constructor or in any code path that runs before `server.connect(transport)`.
 
-**What people do:** Remove the global mutex early to test parallelism.
+**Why it's wrong:** The transport is not established; the notification goes nowhere or throws. The `SfMcpServer` constructor runs before `connect()` is called in `index.ts`.
 
-**Why it's wrong:** lwc-experts still calls `process.chdir()`. Concurrent calls with different directories will corrupt each other's CWD, producing silent wrong results or flaky errors.
+**Do this instead:** Only call `sendLog()` inside `registerTool()` callbacks (which execute post-connect), or in `oninitialized` handler. Guard with a `connected` flag if needed.
 
-**Do this instead:** Scope the mutex to lwc-experts tool names only, then remove the global lock.
+---
 
-### Anti-Pattern 2: Changing Tool Input Schemas to Remove `directory`
+### Anti-Pattern 3: Declaring outputSchema Without Returning structuredContent
 
-**What people do:** Remove the `directory` field from tool schemas once chdir is eliminated.
+**What goes wrong:** Adding `outputSchema` to a tool's config but not returning `structuredContent` in `exec()`. The SDK validates `structuredContent` against `outputSchema` and will throw a validation error because `undefined` does not match the declared schema.
 
-**Why it's wrong:** MCP tool schemas must remain stable. Agents and MCP clients (Claude Desktop, VS Code Copilot, etc.) may have cached the tool schema and will error if a previously-required field disappears. Some agents include `directory` in every call as part of their context-passing behavior.
+**Why it's wrong:** `outputSchema` in the config is a contract — the SDK enforces it.
 
-**Do this instead:** Keep `directory` in the schema but mark it as `optional()` and document that it is no longer used by the tool. It becomes a no-op input rather than a removed one.
+**Do this instead:** Always pair `outputSchema` with a corresponding `structuredContent` return. Use type aliases (not interfaces) for the structured output type for TypeScript assignability.
 
-### Anti-Pattern 3: Per-Org Mutex
+---
 
-**What people do:** Replace the global mutex with one mutex per org alias, reasoning that cross-org concurrency is safe.
+### Anti-Pattern 4: Implementing Prompts as Tools
 
-**Why it's wrong:** `process.cwd()` is process-global — it does not know about org boundaries. Two concurrent calls to different orgs but both calling `process.chdir()` will still race on the same shared CWD.
+**What goes wrong:** Creating an MCP tool named `build_soql_query_prompt` that returns a text message template, instead of using the MCP Prompts primitive.
 
-**Do this instead:** Remove the mutex entirely (after all chdir calls are gone). Use explicit path threading — this eliminates shared mutable state at its root.
+**Why it's wrong:** Prompts in MCP are a distinct primitive intended for user-facing interaction templates (client UIs show them differently; some clients have dedicated prompt UIs). Tools are for LLM-callable operations.
 
-### Anti-Pattern 4: Wrapping SourceTracking.create() Results in process.chdir()
+**Do this instead:** Use `McpPrompt` with `server.registerPrompt()` for reusable interaction templates. Use tools for actions that query or mutate Salesforce state.
 
-**What people do:** Leave `process.chdir()` in place for deploy/retrieve because SourceTracking "might need" the CWD.
+---
 
-**Why it's wrong:** `SfProject.resolve(input.directory)` is sufficient — it passes the path explicitly. SourceTracking receives the SfProject object and uses its embedded path. The CWD-vs-projectPath comparison in `functions.js:163` is a web-platform guard that does not affect Node.js behavior.
+## Confidence Assessment
 
-**Do this instead:** Remove chdir and verify with a concrete deploy test that `SourceTracking.create({ org, project })` behaves correctly with a project resolved from an explicit path.
+| Feature | Confidence | Basis |
+|---------|------------|-------|
+| Annotations — where and what | HIGH | Direct code inspection of all provider packages |
+| structuredContent / outputSchema | MEDIUM | SDK docs (WebFetch); `calculateResponseCharCount` already handles it in code |
+| Resource registration API | HIGH | SDK docs + McpResource class already matches SDK signature |
+| Prompt registration API | HIGH | SDK docs + McpPrompt class already matches SDK signature |
+| registry-utils.ts wiring gap | HIGH | Direct code inspection — `provideResources()`/`providePrompts()` never called |
+| MCP logging / sendLoggingMessage | MEDIUM | GitHub issue #175 confirms `this.server.sendLoggingMessage()`; McpServer-level method existence needs verification |
+| capabilities: prompts absent | HIGH | Direct inspection of `index.ts:181` — only `resources` and `tools` declared |
+| capabilities: logging absent | HIGH | Direct inspection of `index.ts:181` |
+
+---
 
 ## Sources
 
-- Direct inspection of `packages/mcp/src/sf-mcp-server.ts` (line 230: mutex lock; line 85: mutex field)
-- Direct inspection of `packages/mcp-provider-dx-core/src/tools/*.ts` (14 chdir call sites)
-- Direct inspection of `packages/mcp-provider-scale-products/src/tools/scan-apex-antipatterns-tool.ts` (line 140)
-- Direct inspection of `packages/mcp-provider-metadata-enrichment/src/tools/enrich_metadata.ts` (line 156)
-- `@salesforce/core/lib/sfProject.js` line 391: `SfProject.resolve(path ?? process.cwd())`
-- `@salesforce/source-tracking/lib/shared/functions.js` line 163: `process.cwd() !== projectPath` check
-- `packages/mcp/node_modules/@salesforce/mcp-provider-lwc-experts/index.bundle.js`: 2 `process.chdir(e.directory)` calls confirmed
-- `packages/mcp/node_modules/@salesforce/mcp-provider-aura-experts/index.bundle.js`: 0 `process.chdir` calls; 4 `process.cwd()` calls in dotenv bundled code only
-- `packages/mcp/src/utils/auth.ts` line 132: `ConfigAggregator.clearInstance(process.cwd())`
+- Direct inspection: `packages/mcp/src/sf-mcp-server.ts` (lines 1–315)
+- Direct inspection: `packages/mcp/src/index.ts` (lines 177–193, capabilities object)
+- Direct inspection: `packages/mcp/src/utils/registry-utils.ts` (full file — no resource/prompt registration)
+- Direct inspection: `packages/mcp-provider-api/src/resources.ts`, `prompts.ts`, `provider.ts` (NOT CONSUMED YET comments)
+- Direct inspection: `packages/mcp-provider-dx-core/src/tools/*.ts` (14 tools; annotation completeness audit)
+- Direct inspection: `packages/mcp-provider-devops/src/tools/` (12 tools; 10 missing annotations)
+- MCP TypeScript SDK docs (WebFetch): https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/server.md
+- MCP SDK issue #175 (sendLoggingMessage on McpServer): https://github.com/modelcontextprotocol/typescript-sdk/issues/175
 
 ---
-*Architecture research for: Salesforce MCP Server — chdir elimination and tool parallelism*
+
+*Architecture research for: Salesforce MCP Server — v1.2 MCP Best Practices Alignment*
 *Researched: 2026-04-11*
