@@ -298,4 +298,37 @@ describe('SfMcpServer middleware', () => {
       });
     });
   });
+
+  describe('structuredContent pass-through', () => {
+    it('should pass structuredContent from tool callback through wrappedCb unchanged', async () => {
+      const structuredData = { totalSize: 5, done: true, records: [{ Id: '001xx' }] };
+      const cb = sinon.stub().resolves({
+        content: [{ type: 'text', text: JSON.stringify(structuredData) }],
+        structuredContent: structuredData,
+      });
+
+      const wrappedCb = captureWrappedCallback(server, 'test_structured_tool',
+        { query: z.string() }, cb);
+
+      const result = await wrappedCb({ targetOrg: 'staging', query: 'test' }, {});
+
+      expect(result.structuredContent).to.deep.equal(structuredData);
+      expect(result.content).to.deep.equal([{ type: 'text', text: JSON.stringify(structuredData) }]);
+    });
+
+    it('should not include structuredContent when tool returns error', async () => {
+      const cb = sinon.stub().resolves({
+        isError: true,
+        content: [{ type: 'text', text: 'Error occurred' }],
+      });
+
+      const wrappedCb = captureWrappedCallback(server, 'test_error_tool',
+        { query: z.string() }, cb);
+
+      const result = await wrappedCb({ targetOrg: 'staging', query: 'test' }, {});
+
+      expect(result.isError).to.be.true;
+      expect(result).to.not.have.property('structuredContent');
+    });
+  });
 });
