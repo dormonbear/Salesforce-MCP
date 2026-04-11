@@ -119,7 +119,6 @@ Report on my org snapshot`,
         true,
       );
 
-    process.chdir(input.directory);
     const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
 
     switch (input.jobId.substring(0, 3)) {

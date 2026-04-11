@@ -80,7 +80,6 @@ List all orgs`,
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
     try {
-      process.chdir(input.directory);
       const orgs = await this.services.getOrgService().getAllowedOrgs();
       return textResponse(`List of configured Salesforce orgs:\n\n${JSON.stringify(orgs, null, 2)}`);
     } catch (error) {

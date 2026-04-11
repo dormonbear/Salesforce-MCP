@@ -78,7 +78,6 @@ Can you delete test-fe2n4tc8pgku@example.com`,
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
     try {
-      process.chdir(input.directory);
       const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
       const org = await Org.create({ connection });
 

@@ -127,8 +127,6 @@ If it's not clear which type of org to resolve, set both defaultTargetOrg and de
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
     try {
-      process.chdir(input.directory);
-
       const generateResponse = (defaultFromConfig: OrgConfigInfo | undefined): ToolTextResponse =>
         textResponse(`ALWAYS notify the user the following 3 pieces of information:
 1. If it is default target-org or target-dev-hub ('.key' on the config)

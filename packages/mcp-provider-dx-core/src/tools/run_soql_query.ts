@@ -81,7 +81,6 @@ export class QueryOrgMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
           'The usernameOrAlias parameter is required, if the user did not specify one use the #get_username tool',
           true,
         );
-      process.chdir(input.directory);
       const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
       const result = input.useToolingApi
         ? await connection.tooling.query(input.query)

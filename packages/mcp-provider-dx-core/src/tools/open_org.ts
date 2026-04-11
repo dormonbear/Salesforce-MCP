@@ -69,8 +69,6 @@ You can specify a metadata file you want to open.`,
   }
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
-    process.chdir(input.directory);
-
     const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
 
     const org = await Org.create({

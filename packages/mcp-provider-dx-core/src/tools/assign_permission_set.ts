@@ -101,7 +101,6 @@ export class AssignPermissionSetMcpTool extends McpTool<InputArgsShape, OutputAr
           'The usernameOrAlias parameter is required, if the user did not specify one use the #get_username tool',
           true,
         );
-      process.chdir(input.directory);
       // We build the connection from the usernameOrAlias
       const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
 

@@ -147,9 +147,6 @@ What are the results for 707XXXXXXXXXXXX`,
         true,
       );
 
-    // needed for org allowlist to work
-    process.chdir(input.directory);
-
     const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
     try {
       const testService = new TestService(connection);

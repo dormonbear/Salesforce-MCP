@@ -86,8 +86,6 @@ create a snapshot of my MyScratch in myDevHub`,
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
     try {
-      process.chdir(input.directory);
-
       const connection = await this.services.getOrgService().getConnection(input.sourceOrg);
 
       const sourceOrgId = (await Org.create({ connection })).getOrgId();

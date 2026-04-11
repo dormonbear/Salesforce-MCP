@@ -100,8 +100,6 @@ start myAgentTest and don't wait for results`,
         true,
       );
 
-    // needed for org allowlist to work
-    process.chdir(input.directory);
     const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
 
     try {
