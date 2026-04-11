@@ -59,7 +59,10 @@ Plans:
   1. run_soql_query, assign_permission_set, open_org, delete_org, run_apex_test, run_agent_test, list_all_orgs, get_username, resume_tool_operation, and create_org_snapshot all return correct results without a process.chdir() call in their execution path
   2. No process.chdir() call appears in the source of any of the 10 Wave 1 tool files
   3. All existing tests pass after removal
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [x] 03-01-PLAN.md — Remove process.chdir() from all 10 connection-only tools
 
 ### Phase 4: Wave 2 chdir Removal
 
@@ -95,6 +98,6 @@ Plans:
 |-------|-----------|----------------|--------|-----------|
 | 1. Eliminate per-call config reads | v1.0 | — | Complete | 2026-04-09 |
 | 2. Prerequisites | v1.1 | 2/2 | Complete | 2026-04-11 |
-| 3. Wave 1 chdir Removal | v1.1 | 0/TBD | Not started | - |
+| 3. Wave 1 chdir Removal | v1.1 | 1/1 | Complete | 2026-04-11 |
 | 4. Wave 2 chdir Removal | v1.1 | 0/TBD | Not started | - |
 | 5. Concurrency Enablement | v1.1 | 0/TBD | Not started | - |
