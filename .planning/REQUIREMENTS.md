@@ -22,8 +22,8 @@ Requirements for aligning with MCP best practices (2025-2026). Scope limited to 
 
 ### Structured Output
 
-- [ ] **OUT-01**: 5-8 core GA query tools declare `outputSchema` and return `structuredContent` alongside text `content`
-- [ ] **OUT-02**: Middleware pass-through test confirms `structuredContent` survives `wrappedCb` unchanged
+- [x] **OUT-01**: 5-8 core GA query tools declare `outputSchema` and return `structuredContent` alongside text `content`
+- [x] **OUT-02**: Middleware pass-through test confirms `structuredContent` survives `wrappedCb` unchanged
 
 ### Discoverability
 
@@ -66,8 +66,8 @@ Deferred to future milestones.
 | META-01 | Phase 6 | Complete |
 | META-02 | Phase 6 | Complete |
 | ERR-01 | Phase 7 | Complete |
-| OUT-02 | Phase 8 | Pending |
-| OUT-01 | Phase 8 | Pending |
+| OUT-02 | Phase 8 | Complete |
+| OUT-01 | Phase 8 | Complete |
 | DISC-03 | Phase 9 | Pending |
 | DISC-01 | Phase 9 | Pending |
 | DISC-02 | Phase 9 | Pending |

@@ -148,8 +148,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 08-01-PLAN.md — Middleware pass-through test proving structuredContent survives wrappedCb (Wave 1)
-- [ ] 08-02-PLAN.md — Add outputSchema + structuredContent to 6 core tools with schema validation tests (Wave 2)
+- [x] 08-01-PLAN.md — Middleware pass-through test proving structuredContent survives wrappedCb (Wave 1)
+- [x] 08-02-PLAN.md — Add outputSchema + structuredContent to 6 core tools with schema validation tests (Wave 2)
 
 ### Phase 9: MCP Resources
 
@@ -176,5 +176,5 @@ Plans:
 | 5. Concurrency Enablement | v1.1 | 1/1 | Complete | 2026-04-11 |
 | 6. Tool Annotations | v1.2 | 3/3 | Complete | 2026-04-11 |
 | 7. Error Recovery | v1.2 | 2/2 | Complete | 2026-04-11 |
-| 8. Structured Output | v1.2 | 0/2 | Not started | - |
+| 8. Structured Output | v1.2 | 2/2 | Complete | 2026-04-11 |
 | 9. MCP Resources | v1.2 | 0/TBD | Not started | - |
