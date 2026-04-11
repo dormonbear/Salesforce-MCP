@@ -87,6 +87,12 @@ export class SfDevopsResolveConflict extends McpTool<InputArgsShape, OutputArgsS
 `,
       inputSchema: inputSchema.shape,
       outputSchema: undefined,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
     };
   }
 

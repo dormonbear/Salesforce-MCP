@@ -50,6 +50,8 @@ Once a tool has been enabled, you do not need to call list_tools again - instead
       outputSchema: undefined,
       annotations: {
         readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
         openWorldHint: false,
       },
     };

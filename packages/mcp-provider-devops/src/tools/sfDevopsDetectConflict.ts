@@ -84,6 +84,12 @@ export class SfDevopsDetectConflict extends McpTool<InputArgsShape, OutputArgsSh
       - After detection, call 'resolve_devops_center_merge_conflict' to guide the user through conflict resolution.`,
       inputSchema: inputSchema.shape,
       outputSchema: undefined,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
     };
   }
 

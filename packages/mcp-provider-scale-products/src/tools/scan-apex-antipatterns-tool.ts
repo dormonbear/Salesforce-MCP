@@ -132,6 +132,9 @@ Requires an absolute path to the Apex class file.
       outputSchema: undefined,
       annotations: {
         readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
       },
     };
   }

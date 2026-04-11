@@ -56,8 +56,9 @@ Once you have enabled the tool, you MUST invoke that tool to accomplish the user
       inputSchema: enableToolsParamsSchema.shape,
       outputSchema: undefined,
       annotations: {
-        title: 'Enable Salesforce MCP tools',
         readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
         openWorldHint: false,
       },
     };
