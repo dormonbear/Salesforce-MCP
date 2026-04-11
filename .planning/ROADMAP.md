@@ -161,7 +161,11 @@ Plans:
   2. An MCP client can list resources and receive the authenticated org list as a structured resource
   3. An MCP client can read a per-org resource and receive that org's permission levels (read/write/execute for each tool category)
   4. Resources return current data on each read (not cached stale data from startup)
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 09-01-PLAN.md — Wire registerResourcesFromProviders() infrastructure and PermissionService on Services
+- [ ] 09-02-PLAN.md — Implement OrgListResource and OrgPermissionsResource in mcp-provider-dx-core
 
 ## Progress
 
@@ -177,4 +181,4 @@ Plans:
 | 6. Tool Annotations | v1.2 | 3/3 | Complete | 2026-04-11 |
 | 7. Error Recovery | v1.2 | 2/2 | Complete | 2026-04-11 |
 | 8. Structured Output | v1.2 | 2/2 | Complete | 2026-04-11 |
-| 9. MCP Resources | v1.2 | 0/TBD | Not started | - |
+| 9. MCP Resources | v1.2 | 0/2 | Not started | - |
