@@ -80,9 +80,9 @@ export class SfMcpServer extends McpServer implements ToolMethodSignatures {
   /** Default org alias when targetOrg is not provided */
   private defaultOrg: string | undefined;
 
-  // Serializes tool execution to prevent process.chdir() race conditions
-  // across concurrent calls (CWD is global process state).
-  private toolExecutionMutex = new Mutex();
+  // Tools that must run serially (e.g. lwc-experts with internal process.chdir())
+  private serializedTools = new Set<string>();
+  private serializedToolMutex = new Mutex();
 
   /**
    * Creates a new SfMcpServer instance
@@ -111,6 +111,10 @@ export class SfMcpServer extends McpServer implements ToolMethodSignatures {
       }
       this.telemetry?.sendEvent('SERVER_START_SUCCESS');
     };
+  }
+
+  public markToolAsSerialized(name: string): void {
+    this.serializedTools.add(name);
   }
 
   public registerTool<InputArgs extends ZodRawShape, OutputArgs extends ZodRawShape>(
@@ -227,7 +231,10 @@ export class SfMcpServer extends McpServer implements ToolMethodSignatures {
       }
 
       const startTime = Date.now();
-      const result = await this.toolExecutionMutex.lock(() => cb(args as unknown as InputArgs, extra));
+      const execute = (): Promise<CallToolResult> => Promise.resolve(cb(args as unknown as InputArgs, extra));
+      const result = this.serializedTools.has(name)
+        ? await this.serializedToolMutex.lock(execute)
+        : await execute();
       const runtimeMs = Date.now() - startTime;
 
       this.logger.debug(`Tool ${name} completed in ${runtimeMs}ms`);

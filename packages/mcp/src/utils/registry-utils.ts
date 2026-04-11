@@ -135,6 +135,9 @@ async function registerTools(
     }
     const registeredTool = server.registerTool(tool.getName(), tool.getConfig(), (...args) => tool.exec(...args));
     const toolsets = tool.getToolsets();
+    if (toolsets.includes(Toolset.LWC_EXPERTS)) {
+      server.markToolAsSerialized(tool.getName());
+    }
     if (useDynamicTools && !toolsets.includes(Toolset.CORE)) {
       ux.stderr(
         `* Registering tool '${tool.getName()}' but marking it as disabled for now because the server is set for dynamic tool loading.`

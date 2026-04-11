@@ -120,16 +120,9 @@ export async function filterAllowedOrgs(
   });
 }
 
-// Helper function to get default config for a property
-// Values are cached based on ConfigInfo path after first retrieval
-// This is to prevent manipulation of the config file after server start
 async function getDefaultConfig(
   property: OrgConfigProperties.TARGET_ORG | OrgConfigProperties.TARGET_DEV_HUB
 ): Promise<OrgConfigInfo | undefined> {
-  // If the directory changes, the ConfigAggregator singleton does not update.
-  // It continues to use the old local or global config instead.
-  // Clear only the current path's instance to avoid interfering with concurrent operations.
-  await ConfigAggregator.clearInstance(process.cwd());
   const aggregator = await ConfigAggregator.create();
   const config = aggregator.getInfo(property);
 

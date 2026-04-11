@@ -187,14 +187,13 @@ describe('SfMcpServer middleware', () => {
     });
   });
 
-  describe('concurrent tool call serialization', () => {
-    it('should serialize concurrent tool calls so they do not interleave', async () => {
+  describe('concurrent tool execution', () => {
+    it('should run normal tools concurrently (interleaved)', async () => {
       const executionOrder: string[] = [];
 
       const cb = async (args: Record<string, unknown>) => {
         const id = args.query as string;
         executionOrder.push(`start-${id}`);
-        // Simulate async work (e.g. process.chdir + Salesforce API call)
         await new Promise((resolve) => setTimeout(resolve, 50));
         executionOrder.push(`end-${id}`);
         return { content: [{ type: 'text' as const, text: 'ok' }] };
@@ -207,19 +206,41 @@ describe('SfMcpServer middleware', () => {
         cb,
       );
 
-      // Fire two calls concurrently
       await Promise.all([
         wrappedCb({ targetOrg: 'staging', query: 'q1' }, {}),
         wrappedCb({ targetOrg: 'staging', query: 'q2' }, {}),
       ]);
 
-      // If serialized: start-q1, end-q1, start-q2, end-q2
-      // If interleaved: start-q1, start-q2, end-q1, end-q2  (or similar)
       expect(executionOrder).to.have.lengthOf(4);
       expect(executionOrder[0]).to.equal('start-q1');
-      expect(executionOrder[1]).to.equal('end-q1');
-      expect(executionOrder[2]).to.equal('start-q2');
-      expect(executionOrder[3]).to.equal('end-q2');
+      expect(executionOrder[1]).to.equal('start-q2');
+    });
+
+    it('should serialize tools marked as serialized', async () => {
+      server.markToolAsSerialized('serialized_tool');
+      const executionOrder: string[] = [];
+
+      const cb = async (args: Record<string, unknown>) => {
+        const id = args.query as string;
+        executionOrder.push(`start-${id}`);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        executionOrder.push(`end-${id}`);
+        return { content: [{ type: 'text' as const, text: 'ok' }] };
+      };
+
+      const wrappedCb = captureWrappedCallback(
+        server,
+        'serialized_tool',
+        { query: z.string() },
+        cb,
+      );
+
+      await Promise.all([
+        wrappedCb({ targetOrg: 'staging', query: 'q1' }, {}),
+        wrappedCb({ targetOrg: 'staging', query: 'q2' }, {}),
+      ]);
+
+      expect(executionOrder).to.deep.equal(['start-q1', 'end-q1', 'start-q2', 'end-q2']);
     });
 
     it('should preserve correct args for each concurrent call', async () => {
@@ -243,9 +264,38 @@ describe('SfMcpServer middleware', () => {
         wrappedCb({ targetOrg: 'prod', query: 'q2' }, {}),
       ]);
 
-      // Each call should receive its own correct org
       expect(capturedArgs).to.include('staging');
       expect(capturedArgs).to.include('prod');
+    });
+
+    it('should handle 5+ concurrent tool calls without errors', async () => {
+      const results: string[] = [];
+
+      const cb = async (args: Record<string, unknown>) => {
+        const id = args.query as string;
+        await new Promise((resolve) => setTimeout(resolve, Math.random() * 30));
+        results.push(id);
+        return { content: [{ type: 'text' as const, text: `result-${id}` }] };
+      };
+
+      const wrappedCb = captureWrappedCallback(
+        server,
+        'salesforce_query_records',
+        { query: z.string() },
+        cb,
+      );
+
+      const responses = await Promise.all(
+        ['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7'].map((q) =>
+          wrappedCb({ targetOrg: 'staging', query: q }, {})
+        )
+      );
+
+      expect(results).to.have.lengthOf(7);
+      expect(new Set(results).size).to.equal(7);
+      responses.forEach((r: any) => {
+        expect(r.isError).to.be.undefined;
+      });
     });
   });
 });
