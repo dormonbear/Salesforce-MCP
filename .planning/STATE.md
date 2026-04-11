@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Eliminate process.chdir() and Enable Tool Parallelism
-status: planning
-stopped_at: Phase 2 context gathered
-last_updated: "2026-04-11T06:14:30.954Z"
-last_activity: 2026-04-11 — Roadmap created for v1.1 (Phases 2–5)
+status: executing
+stopped_at: Phase 2 complete, Phase 3 starting
+last_updated: "2026-04-11T07:00:00.000Z"
+last_activity: 2026-04-11 — Phase 2 Prerequisites complete (2 plans executed)
 progress:
   total_phases: 4
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_phases: 1
+  total_plans: 2
+  completed_plans: 2
+  percent: 25
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** AI agents can safely and efficiently interact with Salesforce orgs through well-defined, permission-controlled MCP tools.
-**Current focus:** Phase 2 — Prerequisites
+**Current focus:** Phase 3 — Wave 1 chdir Removal
 
 ## Current Position
 
-Phase: 2 of 5 (Prerequisites)
+Phase: 3 of 5 (Wave 1 chdir Removal)
 Plan: — of TBD
 Status: Ready to plan
-Last activity: 2026-04-11 — Roadmap created for v1.1 (Phases 2–5)
+Last activity: 2026-04-11 — Phase 2 Prerequisites complete (2 plans executed)
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [██░░░░░░░░] 25%
 
 ## Performance Metrics
 
@@ -44,7 +44,7 @@ Progress: [░░░░░░░░░░] 0%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 2. Prerequisites | TBD | - | - |
+| 2. Prerequisites | 2/2 | ~30min | ~15min |
 | 3. Wave 1 chdir Removal | TBD | - | - |
 | 4. Wave 2 chdir Removal | TBD | - | - |
 | 5. Concurrency Enablement | TBD | - | - |
