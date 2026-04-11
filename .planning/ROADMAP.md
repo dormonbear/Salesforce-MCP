@@ -75,7 +75,10 @@ Plans:
   3. enrich_metadata completes without process.chdir() with metadata-enrichment library CWD usage confirmed safe
   4. scan_apex_class_for_antipatterns completes without process.chdir()
   5. All existing tests pass after removal
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [x] 04-01-PLAN.md — Remove process.chdir() from all 5 SfProject-dependent tools
 
 ### Phase 5: Concurrency Enablement
 
@@ -99,5 +102,5 @@ Plans:
 | 1. Eliminate per-call config reads | v1.0 | — | Complete | 2026-04-09 |
 | 2. Prerequisites | v1.1 | 2/2 | Complete | 2026-04-11 |
 | 3. Wave 1 chdir Removal | v1.1 | 1/1 | Complete | 2026-04-11 |
-| 4. Wave 2 chdir Removal | v1.1 | 0/TBD | Not started | - |
+| 4. Wave 2 chdir Removal | v1.1 | 1/1 | Complete | 2026-04-11 |
 | 5. Concurrency Enablement | v1.1 | 0/TBD | Not started | - |
