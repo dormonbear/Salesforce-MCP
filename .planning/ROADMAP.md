@@ -47,8 +47,8 @@
 **Plans**: 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Consolidate shared params into mcp-provider-api; migrate all providers
-- [ ] 02-02-PLAN.md — Complete tool-categories.ts; fix SIGTERM handler with graceful shutdown
+- [x] 02-01-PLAN.md — Consolidate shared params into mcp-provider-api; migrate all providers
+- [x] 02-02-PLAN.md — Complete tool-categories.ts; fix SIGTERM handler with graceful shutdown
 
 ### Phase 3: Wave 1 chdir Removal
 
@@ -94,7 +94,7 @@ Plans:
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 1. Eliminate per-call config reads | v1.0 | — | Complete | 2026-04-09 |
-| 2. Prerequisites | v1.1 | 0/2 | Not started | - |
+| 2. Prerequisites | v1.1 | 2/2 | Complete | 2026-04-11 |
 | 3. Wave 1 chdir Removal | v1.1 | 0/TBD | Not started | - |
 | 4. Wave 2 chdir Removal | v1.1 | 0/TBD | Not started | - |
 | 5. Concurrency Enablement | v1.1 | 0/TBD | Not started | - |
