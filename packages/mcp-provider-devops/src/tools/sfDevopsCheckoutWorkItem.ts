@@ -6,7 +6,7 @@ import { fetchWorkItemByName } from "../getWorkItems.js";
 import { SfDevopsUpdateWorkItemStatus } from "./sfDevopsUpdateWorkItemStatus.js";
 import { normalizeAndValidateRepoPath } from "../shared/pathUtils.js";
 import { TelemetryEventNames } from "../constants.js";
-import { usernameOrAliasParam } from "../shared/params.js";
+import { usernameOrAliasParam } from "@salesforce/mcp-provider-api";
 
 const inputSchema = z.object({
   usernameOrAlias: usernameOrAliasParam,

@@ -19,7 +19,7 @@ import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { McpTool, McpToolConfig, ReleaseState, Toolset, Services } from "@salesforce/mcp-provider-api";
 import { updateWorkItemStatus, type WorkItemStatus } from "../updateWorkItemStatus.js";
 import { TelemetryEventNames } from "../constants.js";
-import { usernameOrAliasParam } from "../shared/params.js";
+import { usernameOrAliasParam } from "@salesforce/mcp-provider-api";
 
 const statusEnum = z.enum(["In Progress", "Ready to Promote"]);
 

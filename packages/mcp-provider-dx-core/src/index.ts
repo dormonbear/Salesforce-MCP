@@ -33,7 +33,11 @@ import { TestApexMcpTool } from './tools/run_apex_test.js';
 export {
   usernameOrAliasParam,
   directoryParam,
-} from './shared/params.js';
+  baseAbsolutePathParam,
+  sanitizePath,
+  optionalUsernameOrAliasParam,
+  useToolingApiParam,
+} from '@salesforce/mcp-provider-api';
 
 export class DxCoreMcpProvider extends McpProvider {
   public getName(): string {

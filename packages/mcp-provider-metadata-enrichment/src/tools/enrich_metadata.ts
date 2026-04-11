@@ -20,7 +20,7 @@ import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   directoryParam,
   usernameOrAliasParam,
-} from "@salesforce/mcp-provider-dx-core";
+} from "@salesforce/mcp-provider-api";
 import {
   McpTool,
   McpToolConfig,

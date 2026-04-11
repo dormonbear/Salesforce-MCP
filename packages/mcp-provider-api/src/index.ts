@@ -18,3 +18,5 @@ export {
   type ConfigService,
   type StartupFlags
 } from './services.js';
+
+export { sanitizePath, baseAbsolutePathParam, directoryParam, usernameOrAliasParam, optionalUsernameOrAliasParam, useToolingApiParam } from './params.js';

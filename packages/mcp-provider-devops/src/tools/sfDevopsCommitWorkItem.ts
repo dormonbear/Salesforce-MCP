@@ -7,7 +7,7 @@ import { normalizeAndValidateRepoPath } from "../shared/pathUtils.js";
 import { getCurrentBranch } from "../shared/gitUtils.js";
 import { randomUUID } from 'crypto';
 import { TelemetryEventNames } from "../constants.js";
-import { usernameOrAliasParam } from "../shared/params.js";
+import { usernameOrAliasParam } from "@salesforce/mcp-provider-api";
 
 const inputSchema = z.object({
   usernameOrAlias: usernameOrAliasParam,

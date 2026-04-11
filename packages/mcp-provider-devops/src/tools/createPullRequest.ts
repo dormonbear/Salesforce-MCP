@@ -3,7 +3,7 @@ import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { McpTool, McpToolConfig, ReleaseState, Toolset, Services } from "@salesforce/mcp-provider-api";
 import { createPullRequest } from "../createPullRequest.js";
 import { fetchWorkItemByName } from "../getWorkItems.js";
-import { usernameOrAliasParam } from "../shared/params.js";
+import { usernameOrAliasParam } from "@salesforce/mcp-provider-api";
 
 const inputSchema = z.object({
   workItemName: z.string().min(1).describe("Exact Work Item Name to create pull request."),
