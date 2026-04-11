@@ -68,8 +68,10 @@ export class QueryOrgMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
       inputSchema: queryOrgParamsSchema.shape,
       outputSchema: undefined,
       annotations: {
-        openWorldHint: false,
         readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
       },
     };
   }

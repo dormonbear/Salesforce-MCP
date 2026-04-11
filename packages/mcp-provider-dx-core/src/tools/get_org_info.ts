@@ -47,8 +47,10 @@ export class GetOrgInfoMcpTool extends McpTool<Record<string, never>> {
       inputSchema: {} as Record<string, never>,
       outputSchema: undefined,
       annotations: {
-        openWorldHint: false,
         readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
       },
     };
   }

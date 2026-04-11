@@ -120,6 +120,8 @@ If it's not clear which type of org to resolve, set both defaultTargetOrg and de
       outputSchema: undefined,
       annotations: {
         readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
         openWorldHint: false,
       },
     };

@@ -96,8 +96,10 @@ Retrieve X metadata from my org and ignore any conflicts between the local proje
       inputSchema: retrieveMetadataParams.shape,
       outputSchema: undefined,
       annotations: {
-        openWorldHint: false,
+        readOnlyHint: true,
         destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
       },
     };
   }

@@ -99,7 +99,10 @@ Report on my org snapshot`,
       inputSchema: resumeParamsSchema.shape,
       outputSchema: undefined,
       annotations: {
-        openWorldHint: false,
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
       },
     };
   }
