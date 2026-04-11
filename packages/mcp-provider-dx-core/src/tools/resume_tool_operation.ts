@@ -16,15 +16,15 @@
 
 import { z } from 'zod';
 import { AgentTester } from '@salesforce/agents';
-import { Connection, validateSalesforceId, scratchOrgResume, PollingClient, StatusResult } from '@salesforce/core';
+import { Connection, SfError, validateSalesforceId, scratchOrgResume, PollingClient, StatusResult } from '@salesforce/core';
 import { Duration } from '@salesforce/kit';
 import { MetadataApiDeploy } from '@salesforce/source-deploy-retrieve';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, McpToolConfig, ReleaseState, Services, Toolset, toolError, classifyError } from '@salesforce/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { ensureString } from '@salesforce/ts-types';
 import { textResponse } from '../shared/utils.js';
 import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
-import { type ToolTextResponse } from '../shared/types.js';
+
 
 const resumableIdPrefixes = new Map<string, string>([
   ['deploy', '0Af'],
@@ -139,17 +139,23 @@ Report on my org snapshot`,
   }
 }
 
-async function resumeDeployment(connection: Connection, jobId: string, wait: number): Promise<ToolTextResponse> {
+async function resumeDeployment(connection: Connection, jobId: string, wait: number): Promise<CallToolResult> {
   try {
     const deploy = new MetadataApiDeploy({ usernameOrConnection: connection, id: jobId });
     const result = await deploy.pollStatus({ timeout: Duration.minutes(wait) });
     return textResponse(`Deploy result: ${JSON.stringify(result.response)}`, !result.response.success);
   } catch (error) {
-    return textResponse(`Resumed deployment failed: ${error instanceof Error ? error.message : 'Unknown error'}`, true);
+    const err = SfError.wrap(error);
+    const recovery = err.actions?.join(' ')
+      ?? 'Verify the deploy jobId is correct (starts with 0Af). The deployment may have been canceled or the org session expired.';
+    return toolError(`Resumed deployment failed: ${err.message}`, {
+      recovery,
+      category: classifyError(err),
+    });
   }
 }
 
-async function resumeOrgSnapshot(connection: Connection, jobId: string, wait: number): Promise<ToolTextResponse> {
+async function resumeOrgSnapshot(connection: Connection, jobId: string, wait: number): Promise<CallToolResult> {
   try {
     const poller = await PollingClient.create({
       timeout: Duration.minutes(wait),
@@ -171,31 +177,43 @@ async function resumeOrgSnapshot(connection: Connection, jobId: string, wait: nu
     const result = await poller.subscribe();
     return textResponse(`Org snapshot: ${JSON.stringify(result)}`);
   } catch (error) {
-    return textResponse(
-      `Resumed org snapshot failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      true,
-    );
+    const err = SfError.wrap(error);
+    const recovery = err.actions?.join(' ')
+      ?? 'Verify the snapshot ID is correct (starts with 0Oo). Check that Org Snapshots are enabled in the org.';
+    return toolError(`Resumed org snapshot failed: ${err.message}`, {
+      recovery,
+      category: classifyError(err),
+    });
   }
 }
 
-async function resumeScratchOrg(jobId: string, wait: number): Promise<ToolTextResponse> {
+async function resumeScratchOrg(jobId: string, wait: number): Promise<CallToolResult> {
   try {
     const result = await scratchOrgResume(jobId, Duration.minutes(wait));
     return textResponse(`Successfully created scratch org, username: ${ensureString(result.username)}`);
   } catch (error) {
-    return textResponse(
-      `Resumed scratch org creation failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      true,
-    );
+    const err = SfError.wrap(error);
+    const recovery = err.actions?.join(' ')
+      ?? 'Verify the scratch org request ID is correct (starts with 2SR). The Dev Hub org session may have expired.';
+    return toolError(`Resumed scratch org creation failed: ${err.message}`, {
+      recovery,
+      category: classifyError(err),
+    });
   }
 }
 
-async function resumeAgentTest(connection: Connection, jobId: string, wait: number): Promise<ToolTextResponse> {
+async function resumeAgentTest(connection: Connection, jobId: string, wait: number): Promise<CallToolResult> {
   try {
     const agentTester = new AgentTester(connection);
     const result = await agentTester.poll(jobId, { timeout: Duration.minutes(wait) });
     return textResponse(`Agent test result: ${JSON.stringify(result)}`, !!result.errorMessage);
   } catch (error) {
-    return textResponse(`Resumed agent test failed: ${error instanceof Error ? error.message : 'Unknown error'}`, true);
+    const err = SfError.wrap(error);
+    const recovery = err.actions?.join(' ')
+      ?? 'Verify the agent test run ID is correct (starts with 4KB). The test may have been canceled.';
+    return toolError(`Resumed agent test failed: ${err.message}`, {
+      recovery,
+      category: classifyError(err),
+    });
   }
 }

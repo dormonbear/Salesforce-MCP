@@ -15,7 +15,7 @@
  */
 
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, McpToolConfig, ReleaseState, Services, Toolset, toolError, classifyError } from '@salesforce/mcp-provider-api';
 import { textResponse } from '../shared/utils.js';
 
 export class GetOrgInfoMcpTool extends McpTool<Record<string, never>> {
@@ -75,8 +75,11 @@ export class GetOrgInfoMcpTool extends McpTool<Record<string, never>> {
 
       return textResponse(JSON.stringify(result, null, 2));
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      return textResponse(`Failed to retrieve org info: ${errorMessage}`, true);
+      const err = error instanceof Error ? error : new Error(String(error));
+      return toolError(`Failed to retrieve org info: ${err.message}`, {
+        recovery: 'Check that orgs are authorized. Re-authenticate expired orgs with "sf org login".',
+        category: classifyError(err),
+      });
     }
   }
 }

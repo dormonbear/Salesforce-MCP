@@ -18,7 +18,8 @@ import { z } from 'zod';
 import { TestLevel, TestResult, TestRunIdResult, TestService } from '@salesforce/apex-node';
 import { ApexTestResultOutcome } from '@salesforce/apex-node/lib/src/tests/types.js';
 import { Duration, ensureArray } from '@salesforce/kit';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, McpToolConfig, ReleaseState, Services, Toolset, toolError, classifyError } from '@salesforce/mcp-provider-api';
+import { SfError } from '@salesforce/core';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
 import { textResponse } from '../shared/utils.js';
@@ -188,7 +189,14 @@ What are the results for 707XXXXXXXXXXXX`,
 
       return textResponse(`Test result: ${JSON.stringify(result)}`);
     } catch (e) {
-      return textResponse(`Failed to run Apex Tests: ${e instanceof Error ? e.message : 'Unknown error'}`, true);
+      const err = SfError.wrap(e);
+      const recovery = err.actions?.join(' ')
+        ?? 'Verify the test class names exist in the org. Use run_soql_query with "SELECT Name FROM ApexClass WHERE Name IN (\'ClassName\')" to confirm.';
+
+      return toolError(`Failed to run Apex tests: ${err.message}`, {
+        recovery,
+        category: classifyError(err),
+      });
     }
   }
 }

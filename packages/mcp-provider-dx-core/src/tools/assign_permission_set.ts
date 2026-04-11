@@ -15,8 +15,8 @@
  */
 
 import { z } from 'zod';
-import { Org, StateAggregator, User } from '@salesforce/core';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { Org, SfError, StateAggregator, User } from '@salesforce/core';
+import { McpTool, McpToolConfig, ReleaseState, Services, Toolset, toolError, classifyError } from '@salesforce/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
 import { textResponse } from '../shared/utils.js';
@@ -129,10 +129,15 @@ export class AssignPermissionSetMcpTool extends McpTool<InputArgsShape, OutputAr
 
       return textResponse(`Assigned ${input.permissionSetName} to ${assignTo}`);
     } catch (error) {
-      return textResponse(
-        `Failed to assign permission set: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        true,
-      );
+      const err = SfError.wrap(error);
+
+      const recovery = err.actions?.join(' ')
+        ?? 'Verify the permission set name is correct. Use run_soql_query with "SELECT Name FROM PermissionSet WHERE IsOwnedByProfile = false" to list assignable permission sets.';
+
+      return toolError(`Failed to assign permission set: ${err.message}`, {
+        recovery,
+        category: classifyError(err),
+      });
     }
   }
 }

@@ -17,7 +17,8 @@
 import { z } from 'zod';
 import { AgentTester } from '@salesforce/agents';
 import { Duration } from '@salesforce/kit';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, McpToolConfig, ReleaseState, Services, Toolset, toolError, classifyError } from '@salesforce/mcp-provider-api';
+import { SfError } from '@salesforce/core';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
 import { textResponse } from '../shared/utils.js';
@@ -117,7 +118,14 @@ start myAgentTest and don't wait for results`,
         return textResponse(`Test result: ${JSON.stringify(result)}`);
       }
     } catch (e) {
-      return textResponse(`Failed to run Agent Tests: ${e instanceof Error ? e.message : 'Unknown error'}`, true);
+      const err = SfError.wrap(e);
+      const recovery = err.actions?.join(' ')
+        ?? 'Verify the agentApiName matches an aiEvaluationDefinition in the org. List files matching **/aiEvaluationDefinitions/*.aiEvaluationDefinition-meta.xml to check.';
+
+      return toolError(`Failed to run agent tests: ${err.message}`, {
+        recovery,
+        category: classifyError(err),
+      });
     }
   }
 }
