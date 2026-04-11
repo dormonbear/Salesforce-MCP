@@ -20,3 +20,5 @@ export {
 } from './services.js';
 
 export { sanitizePath, baseAbsolutePathParam, directoryParam, usernameOrAliasParam, optionalUsernameOrAliasParam, useToolingApiParam } from './params.js';
+
+export { toolError, classifyError, type ErrorCategory, type ToolErrorOptions } from './errors.js';
