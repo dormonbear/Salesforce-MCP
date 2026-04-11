@@ -129,7 +129,11 @@ Plans:
   2. A shared toolError(message, recovery?) factory in mcp-provider-api produces the standardized error format
   3. No catch block in the top-10 tools silently swallows errors or returns raw stack traces to the LLM
   4. Error messages distinguish between user-fixable errors (wrong org alias, missing permission) and system errors (network timeout, auth expiry)
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 07-01-PLAN.md — Create toolError() factory and classifyError() in mcp-provider-api with TDD (Wave 1)
+- [ ] 07-02-PLAN.md — Migrate all 10 top-used GA tools to toolError() with domain-specific recovery hints (Wave 2)
 
 ### Phase 8: Structured Output
 
@@ -168,6 +172,6 @@ Plans:
 | 4. Wave 2 chdir Removal | v1.1 | 1/1 | Complete | 2026-04-11 |
 | 5. Concurrency Enablement | v1.1 | 1/1 | Complete | 2026-04-11 |
 | 6. Tool Annotations | v1.2 | 3/3 | Complete | 2026-04-11 |
-| 7. Error Recovery | v1.2 | 0/TBD | Not started | - |
+| 7. Error Recovery | v1.2 | 0/2 | In progress | - |
 | 8. Structured Output | v1.2 | 0/TBD | Not started | - |
 | 9. MCP Resources | v1.2 | 0/TBD | Not started | - |
