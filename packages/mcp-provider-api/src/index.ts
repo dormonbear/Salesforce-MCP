@@ -16,7 +16,11 @@ export {
   type TelemetryEvent,
   type OrgService,
   type ConfigService,
-  type StartupFlags
+  type StartupFlags,
+  type PermissionService,
+  type OrgPermission,
+  type PermissionResult,
+  type ToolCategory
 } from './services.js';
 
 export { sanitizePath, baseAbsolutePathParam, directoryParam, usernameOrAliasParam, optionalUsernameOrAliasParam, useToolingApiParam } from './params.js';

@@ -1,10 +1,21 @@
 import { type Connection } from '@salesforce/core';
 import { type OrgConfigInfo, type SanitizedOrgAuthorization } from './types.js';
 
+export type OrgPermission = 'read-only' | 'full-access' | 'approval-required';
+export type PermissionResult = 'allow' | 'deny' | 'needs-approval';
+export type ToolCategory = 'read' | 'write' | 'execute';
+
+export interface PermissionService {
+  getOrgPermission(orgName: string): OrgPermission;
+  canExecuteCategory(orgName: string, category: ToolCategory): PermissionResult;
+  getAuthorizedOrgs(): string[];
+}
+
 export interface Services {
   getTelemetryService(): TelemetryService;
   getOrgService(): OrgService;
   getConfigService(): ConfigService;
+  getPermissionService(): PermissionService;
 }
 
 export interface TelemetryService {

@@ -21,6 +21,9 @@ import {
   SanitizedOrgAuthorization,
   ConfigService,
   StartupFlags,
+  PermissionService,
+  OrgPermission,
+  ToolCategory,
 } from '@salesforce/mcp-provider-api';
 import Cache from './utils/cache.js';
 import {
@@ -30,16 +33,31 @@ import {
   getAllAllowedOrgs,
   findOrgByUsernameOrAlias,
 } from './utils/auth.js';
+import {
+  getOrgPermission,
+  canExecute,
+  type OrgPermission as InternalOrgPermission,
+} from './utils/org-permissions.js';
 
 export class Services implements IServices {
   private readonly telemetry: TelemetryService;
   private readonly dataDir: string;
   private readonly startupFlags: StartupFlags;
+  private readonly orgPermissions: Map<string, InternalOrgPermission>;
+  private readonly authorizedOrgs: string[];
 
-  public constructor(opts: { telemetry: TelemetryService | undefined; dataDir: string; startupFlags: StartupFlags }) {
+  public constructor(opts: {
+    telemetry: TelemetryService | undefined;
+    dataDir: string;
+    startupFlags: StartupFlags;
+    orgPermissions: Map<string, InternalOrgPermission>;
+    authorizedOrgs: string[];
+  }) {
     this.telemetry = opts.telemetry ? opts.telemetry : new NoopTelemetryService();
     this.dataDir = opts.dataDir;
     this.startupFlags = opts.startupFlags;
+    this.orgPermissions = opts.orgPermissions;
+    this.authorizedOrgs = opts.authorizedOrgs;
   }
 
   public getTelemetryService(): TelemetryService {
@@ -62,6 +80,18 @@ export class Services implements IServices {
       getDefaultTargetDevHub: () => getDefaultTargetDevHub(),
       findOrgByUsernameOrAlias: (allOrgs: SanitizedOrgAuthorization[], usernameOrAlias: string) =>
         findOrgByUsernameOrAlias(allOrgs, usernameOrAlias),
+    };
+  }
+
+  public getPermissionService(): PermissionService {
+    const permissions = this.orgPermissions;
+    const orgs = this.authorizedOrgs;
+    return {
+      getOrgPermission: (orgName: string): OrgPermission =>
+        getOrgPermission(permissions, orgName),
+      canExecuteCategory: (orgName: string, category: ToolCategory) =>
+        canExecute(permissions, orgName, category),
+      getAuthorizedOrgs: () => [...orgs],
     };
   }
 }
