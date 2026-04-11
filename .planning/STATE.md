@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: MCP Best Practices Alignment
-status: active
-stopped_at: Roadmap created, ready to plan Phase 6
-last_updated: "2026-04-11T12:00:00.000Z"
-last_activity: 2026-04-11 — v1.2 roadmap created (Phases 6-9)
+status: planning
+stopped_at: Completed 06-01-PLAN.md — all 10 dx-core GA tools have complete 4-hint annotations
+last_updated: "2026-04-11T10:50:52.577Z"
+last_activity: 2026-04-11 — v1.2 roadmap created, Phases 6-9 defined
 progress:
   total_phases: 4
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_plans: 3
+  completed_plans: 1
+  percent: 33
 ---
 
 # Project State
@@ -47,6 +47,9 @@ Progress: [░░░░░░░░░░] 0%
 - [v1.2 Research]: Do NOT upgrade SDK to 1.29.0 — ZodRawShapeCompat signature change, zero functional benefit
 - [v1.2 Roadmap]: OUT-02 middleware test is prerequisite for OUT-01 — add pass-through test before any outputSchema work
 - [v1.2 Roadmap]: DISC-03 wiring is prerequisite for DISC-01/02 — implementation and wiring ship together in Phase 9
+- [Phase 06-01]: retrieve_metadata gets readOnlyHint:true — org-side read classification, local filesystem writes are not counted
+- [Phase 06-01]: assign_permission_set gets idempotentHint:true — assigning same perm set twice is a no-op
+- [Phase 06-01]: deploy_metadata gets openWorldHint:true — deploys to external org network, corrected from pre-existing false
 
 ### Pending Todos
 
@@ -58,6 +61,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-11T12:00:00.000Z
-Stopped at: Roadmap created — ready to plan Phase 6
-Resume file: —
+Last session: 2026-04-11T10:50:52.572Z
+Stopped at: Completed 06-01-PLAN.md — all 10 dx-core GA tools have complete 4-hint annotations
+Resume file: None

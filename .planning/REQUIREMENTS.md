@@ -13,8 +13,8 @@ Requirements for aligning with MCP best practices (2025-2026). Scope limited to 
 
 ### Tool Metadata
 
-- [ ] **META-01**: All GA tools declare complete `readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint` annotations
-- [ ] **META-02**: Annotations values are consistent with `tool-categories.ts` read/write/execute classification
+- [x] **META-01**: All GA tools declare complete `readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint` annotations
+- [x] **META-02**: Annotations values are consistent with `tool-categories.ts` read/write/execute classification
 
 ### Error Experience
 
@@ -63,8 +63,8 @@ Deferred to future milestones.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| META-01 | Phase 6 | Pending |
-| META-02 | Phase 6 | Pending |
+| META-01 | Phase 6 | Complete |
+| META-02 | Phase 6 | Complete |
 | ERR-01 | Phase 7 | Pending |
 | OUT-02 | Phase 8 | Pending |
 | OUT-01 | Phase 8 | Pending |
