@@ -158,7 +158,10 @@ export class CodeAnalyzerListRulesMcpTool extends McpTool<InputArgsShape, Output
             inputSchema: inputSchema.shape,
             outputSchema: outputSchema.shape,
             annotations: {
-                readOnlyHint: true
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: false,
             }
         }
     }
