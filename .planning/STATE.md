@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Smart Schema Cache
 status: executing
-stopped_at: Phase 11 context gathered
-last_updated: "2026-04-12T16:07:47.625Z"
+stopped_at: Phase 12 complete
+last_updated: "2026-04-12T17:30:00.000Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 6
-  completed_phases: 2
-  total_plans: 3
-  completed_plans: 3
-  percent: 100
+  completed_phases: 3
+  total_plans: 4
+  completed_plans: 4
+  percent: 50
 ---
 
 # Project State
@@ -21,23 +21,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-12)
 
 **Core value:** AI agents can safely and efficiently interact with Salesforce orgs through well-defined, permission-controlled MCP tools.
-**Current focus:** Phase 11 — schema-discovery-tool
+**Current focus:** Phase 13 — failure-recovery-suggestions
 
 ## Current Position
 
-Phase: 12
+Phase: 13
 Plan: Not started
-Status: Executing Phase 11
+Status: Phase 12 complete, advancing to Phase 13
 Last activity: 2026-04-12
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
 **Velocity:**
 
 - Total plans completed: 12 (v1.2)
-- v1.3 plans completed: 0
+- v1.3 plans completed: 4 (Phase 10: 2 plans, Phase 11: 1 plan, Phase 12: 1 plan)
 
 ## Accumulated Context
 
@@ -50,6 +50,9 @@ Progress: [░░░░░░░░░░] 0%
 - [v1.3 Roadmap]: Cache key is canonical username (not alias) — prevents cross-org schema bleed
 - [v1.3 Roadmap]: Levenshtein for fuzzy match (no vector deps) — fuse.js optional for ranked scoring
 - [v1.3 Roadmap]: Disk persistence via per-org JSON files in dataDir — load on startup, discard expired entries
+- [v1.3 Phase 12]: Regex SOQL parser (not AST) — extracts flat SELECT…FROM; returns null for complex queries
+- [v1.3 Phase 12]: Fire-and-forget auto-cache hook — never fail a successful query because of caching
+- [v1.3 Phase 12]: Partial+partial union merge at call site; full overwrites partial entirely via set()
 
 ### Pending Todos
 
@@ -61,6 +64,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-12T15:38:14.844Z
-Stopped at: Phase 11 context gathered
-Resume file: .planning/phases/11-schema-discovery-tool/11-CONTEXT.md
+Last session: 2026-04-12T17:30:00.000Z
+Stopped at: Phase 12 complete
+Resume file: .planning/phases/12-auto-cache-on-success/12-VERIFICATION.md
