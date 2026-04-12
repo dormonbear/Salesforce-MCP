@@ -255,8 +255,10 @@ Plans:
   1. The N most recent successful SOQL queries per org are stored in a ring buffer (default N=50), with oldest entries automatically overwritten
   2. The retention limit is configurable via environment variable or server config — changing it takes effect without code changes
   3. Query history is accessible via a list_query_history tool that returns stored queries with timestamps and object names
-**Plans**: TBD
-**UI hint**: no
+**Plans**: 1 plan
+
+Plans:
+- [ ] 15-01-PLAN.md — TDD: QueryHistoryService ring buffer + ListQueryHistoryMcpTool + recording hook wiring
 
 ## Progress
 
