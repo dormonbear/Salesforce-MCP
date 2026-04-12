@@ -26,3 +26,5 @@ export {
 } from './types.js';
 export { parseSoqlFields, type ParsedSoql } from './soql-parser.js';
 export { extractRelationshipEdges } from './relationship-edges.js';
+export { QueryHistoryService } from './query-history-service.js';
+export { RingBuffer, type QueryHistoryEntry } from './query-history-types.js';
