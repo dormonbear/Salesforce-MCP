@@ -3205,31 +3205,6 @@
     ts-retry-promise "^0.8.1"
     zod "^4.1.12"
 
-"@salesforce/core@^8.26.3":
-  version "8.26.3"
-  resolved "https://registry.npmjs.org/@salesforce/core/-/core-8.26.3.tgz"
-  integrity sha512-lPNFHjHFeC4V3KuH88xuVLGhAqmtM8meUcvyejNh8bQ5w642APKRTGDZ0pOnWHJAe5SQy7cSQ1WqvO3V73ouQw==
-  dependencies:
-    "@jsforce/jsforce-node" "^3.10.13"
-    "@salesforce/kit" "^3.2.4"
-    "@salesforce/ts-types" "^2.0.12"
-    ajv "^8.18.0"
-    change-case "^4.1.2"
-    fast-levenshtein "^3.0.0"
-    faye "^1.4.1"
-    form-data "^4.0.4"
-    js2xmlparser "^4.0.1"
-    jsonwebtoken "9.0.3"
-    jszip "3.10.1"
-    memfs "^4.30.1"
-    pino "^9.7.0"
-    pino-abstract-transport "^1.2.0"
-    pino-pretty "^11.3.0"
-    proper-lockfile "^4.1.2"
-    semver "^7.7.3"
-    ts-retry-promise "^0.8.1"
-    zod "^4.1.12"
-
 "@salesforce/core@^8.27.0":
   version "8.27.0"
   resolved "https://registry.npmjs.org/@salesforce/core/-/core-8.27.0.tgz"
@@ -3350,6 +3325,18 @@
     semver "^7.7.2"
     zod "^3.25.76"
 
+"@salesforce/mcp-provider-api@0.6.0":
+  version "0.6.0"
+  resolved "https://registry.yarnpkg.com/@salesforce/mcp-provider-api/-/mcp-provider-api-0.6.0.tgz#2fbcc660234d1fa0d7521fe8cb079763d63d64eb"
+  integrity sha512-gQAbtjBnPZwUxm+One7ilx8dOyK4u+deWaCnSoCORtbLPY4ZIxIREj93H5icHjZud/MT1SnJ0EUHg0Mg1d7s+A==
+  dependencies:
+    "@modelcontextprotocol/sdk" "^1.18.0"
+    "@salesforce/core" "^8.24.3"
+    "@salesforce/ts-types" "^2"
+    "@types/semver" "^7.7.1"
+    semver "^7.7.2"
+    zod "^3.25.76"
+
 "@salesforce/mcp-provider-api@^0.4.1":
   version "0.4.1"
   resolved "https://registry.npmjs.org/@salesforce/mcp-provider-api/-/mcp-provider-api-0.4.1.tgz"
@@ -3434,14 +3421,6 @@
     "@salesforce/source-deploy-retrieve" "^12.31.14"
     "@salesforce/ts-types" "^2.0.11"
     fast-xml-parser "^5.5.7"
-
-"@salesforce/o11y-reporter@1.8.1":
-  version "1.8.1"
-  resolved "https://registry.npmjs.org/@salesforce/o11y-reporter/-/o11y-reporter-1.8.1.tgz"
-  integrity sha512-zXfFWoNBxkBDPq96X7wJuO2E6T+VsY9sWVfqVnqA2bMrw4ix8hWkXa6IdEytXMCe8mMsaXwGD4Iua0WNzrYhWA==
-  dependencies:
-    o11y "^258.7.0"
-    o11y_schema "256.154.0"
 
 "@salesforce/o11y-reporter@1.8.2":
   version "1.8.2"
@@ -3541,19 +3520,6 @@
     applicationinsights "^2.9.8"
     got "^11"
     o11y_schema "^260.52.0"
-    proxy-agent "^6.5.0"
-
-"@salesforce/telemetry@^6.8.0":
-  version "6.8.0"
-  resolved "https://registry.npmjs.org/@salesforce/telemetry/-/telemetry-6.8.0.tgz"
-  integrity sha512-iUT4Svyqr7dPqHJZqK52XQT/prNnutRT/KmElihb39iQ6Kw7cDyH/OuKBF8I72s1vCeHMyc66DzoJ0XT/TFTrA==
-  dependencies:
-    "@salesforce/core" "^8.26.3"
-    "@salesforce/kit" "^3.2.4"
-    "@salesforce/o11y-reporter" "1.8.1"
-    applicationinsights "^2.9.8"
-    got "^11"
-    o11y_schema "^260.47.0"
     proxy-agent "^6.5.0"
 
 "@salesforce/ts-types@^2", "@salesforce/ts-types@^2.0.11", "@salesforce/ts-types@^2.0.12":
@@ -9109,6 +9075,11 @@ lru-cache@^11.0.0:
   resolved "https://registry.npmjs.org/lru-cache/-/lru-cache-11.2.2.tgz"
   integrity sha512-F9ODfyqML2coTIsQpSkRHnLSZMtkU8Q+mSfcaIyKwy58u+8k5nvAYeiNhsyMARvzNcXJ9QfWVrcPsC9e9rAxtg==
 
+lru-cache@^11.1.0:
+  version "11.3.3"
+  resolved "https://registry.yarnpkg.com/lru-cache/-/lru-cache-11.3.3.tgz#d6c633c2a9657760fd30594d8d98da65330d9d78"
+  integrity sha512-JvNw9Y81y33E+BEYPr0U7omo+U9AySnsMsEiXgwT6yqd31VQWTLNQqmT4ou5eqPFUrTfIDFta2wKhB1hyohtAQ==
+
 lru-cache@^5.1.1:
   version "5.1.1"
   resolved "https://registry.npmjs.org/lru-cache/-/lru-cache-5.1.1.tgz"
@@ -9648,11 +9619,6 @@ o11y_schema@256.154.0:
   version "256.154.0"
   resolved "https://registry.npmjs.org/o11y_schema/-/o11y_schema-256.154.0.tgz"
   integrity sha512-czvU/9cibyZptbr0gLJSM70U7zLlhWC2D2L5e9nOG84Wnqmn4F5YzVjrH1ZQzAzDbBbtbeU6WTS3F/SHqtMQ5g==
-
-o11y_schema@^260.47.0:
-  version "260.50.0"
-  resolved "https://registry.npmjs.org/o11y_schema/-/o11y_schema-260.50.0.tgz"
-  integrity sha512-87ig+sAQ6ohHH0DmdX7I+sVcYpRXqRy676+VjBsrwkzwzMOCgKNmEGkxaTyqNZW5pJogdcvS8jy7zdcxuKyapQ==
 
 o11y_schema@^260.52.0:
   version "260.52.0"

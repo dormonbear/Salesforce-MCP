@@ -20,7 +20,7 @@ import { SfError } from '@salesforce/core';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { textResponse } from '../shared/utils.js';
 import { directoryParam, usernameOrAliasParam, useToolingApiParam } from '../shared/params.js';
-import { SchemaService } from '../schema/index.js';
+import { SchemaService, QueryHistoryService } from '../schema/index.js';
 import { SchemaEntryType, type PartialFieldsEntry, type FullDescribeEntry, type RelationshipEdge } from '../schema/types.js';
 import { parseSoqlFields } from '../schema/soql-parser.js';
 import { findSimilarFields } from '../schema/levenshtein.js';
@@ -60,6 +60,7 @@ export class QueryOrgMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
   public constructor(
     private readonly services: Services,
     private readonly schemaService: SchemaService,
+    private readonly queryHistoryService?: QueryHistoryService,
   ) {
     super();
   }
@@ -159,6 +160,19 @@ export class QueryOrgMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
         }
       } catch {
         // Silent — suggestions must never fail a successful query
+      }
+
+      // Query history: record successful non-tooling queries (QHST-01)
+      if (!input.useToolingApi && this.queryHistoryService) {
+        try {
+          const parsed = parseSoqlFields(input.query);
+          if (parsed) {
+            const orgUsername = connection.getUsername() ?? input.usernameOrAlias;
+            this.queryHistoryService.record(orgUsername, input.query, parsed.objectName, parsed.fieldNames.length);
+          }
+        } catch {
+          // Silent — history recording must never fail a successful query
+        }
       }
 
       const structured = { totalSize: result.totalSize, done: result.done, records: result.records };

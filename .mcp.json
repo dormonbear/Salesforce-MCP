@@ -2,12 +2,10 @@
   "mcpServers": {
     "salesforce-dx": {
       "type": "stdio",
-      "command": "npx",
+      "command": "/tmp/mcp-isolated/node_modules/.bin/salesforce-mcp",
       "args": [
-        "-y",
-        "@dormon/salesforce-mcp",
         "--orgs",
-        "DEFAULT_TARGET_ORG",
+        "ALLOW_ALL_ORGS",
         "--toolsets",
         "all",
         "--allow-non-ga-tools"

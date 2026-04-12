@@ -33,7 +33,7 @@
 import { McpProvider, McpResource, McpResourceTemplate, McpTool, Services } from '@dormon/mcp-provider-api';
 import { OrgListResource } from './resources/org-list-resource.js';
 import { OrgPermissionsResource } from './resources/org-permissions-resource.js';
-import { SchemaService } from './schema/index.js';
+import { SchemaService, QueryHistoryService } from './schema/index.js';
 import { AssignPermissionSetMcpTool } from './tools/assign_permission_set.js';
 import { CreateOrgSnapshotMcpTool } from './tools/create_org_snapshot.js';
 import { CreateScratchOrgMcpTool } from './tools/create_scratch_org.js';
@@ -49,6 +49,7 @@ import { RetrieveMetadataMcpTool } from './tools/retrieve_metadata.js';
 import { TestAgentsMcpTool } from './tools/run_agent_test.js';
 import { TestApexMcpTool } from './tools/run_apex_test.js';
 import { DescribeObjectMcpTool } from './tools/describe_object.js';
+import { ListQueryHistoryMcpTool } from './tools/list_query_history.js';
 
 export {
   usernameOrAliasParam,
@@ -61,6 +62,7 @@ export {
 
 export class DxCoreMcpProvider extends McpProvider {
   private schemaService?: SchemaService;
+  private queryHistoryService?: QueryHistoryService;
   private sigTermRegistered = false;
 
   public getName(): string {
@@ -69,6 +71,10 @@ export class DxCoreMcpProvider extends McpProvider {
 
   public getSchemaService(): SchemaService | undefined {
     return this.schemaService;
+  }
+
+  public getQueryHistoryService(): QueryHistoryService | undefined {
+    return this.queryHistoryService;
   }
 
   public provideResources(services: Services): Promise<(McpResource | McpResourceTemplate)[]> {
@@ -86,6 +92,10 @@ export class DxCoreMcpProvider extends McpProvider {
 
     // Hydrate cache from disk (discards TTL-expired entries)
     await schemaService.loadFromDisk();
+
+    // Create QueryHistoryService singleton (in-memory, per-process)
+    const queryHistoryService = new QueryHistoryService();
+    this.queryHistoryService = queryHistoryService;
 
     // Register SIGTERM handler for graceful shutdown (once only)
     if (!this.sigTermRegistered) {
@@ -105,12 +115,13 @@ export class DxCoreMcpProvider extends McpProvider {
       new GetUsernameMcpTool(services),
       new ListAllOrgsMcpTool(services),
       new OrgOpenMcpTool(services),
-      new QueryOrgMcpTool(services, schemaService),
+      new QueryOrgMcpTool(services, schemaService, queryHistoryService),
       new ResumeMcpTool(services),
       new RetrieveMetadataMcpTool(services),
       new TestAgentsMcpTool(services),
       new TestApexMcpTool(services),
       new DescribeObjectMcpTool(services, schemaService),
+      new ListQueryHistoryMcpTool(services, queryHistoryService),
     ];
   }
 }

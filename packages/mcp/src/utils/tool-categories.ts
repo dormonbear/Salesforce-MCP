@@ -6,6 +6,7 @@ const toolCategoryMap: Record<string, ToolCategory> = {
   salesforce_query_records: 'read',
   salesforce_aggregate_query: 'read',
   salesforce_describe_object: 'read',
+  salesforce_list_query_history: 'read',
   salesforce_search_all: 'read',
   salesforce_search_objects: 'read',
   salesforce_read_apex: 'read',
