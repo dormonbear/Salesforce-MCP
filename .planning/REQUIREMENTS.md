@@ -57,10 +57,10 @@ Requirements for Smart Schema Cache milestone. Reduces AI SOQL query failures th
 
 ### Failure Recovery
 
-- [ ] **FAIL-01**: On `INVALID_FIELD` SOQL error, auto-call `connection.describe()` for the failing object
-- [ ] **FAIL-02**: Fuzzy-match the failing field name against actual field names using Levenshtein distance (no external vector dependencies)
-- [ ] **FAIL-03**: Return top 3 field suggestions ranked by similarity alongside the original error message
-- [ ] **FAIL-04**: Update schema cache with the fresh describe result from the failure recovery path
+- [x] **FAIL-01**: On `INVALID_FIELD` SOQL error, auto-call `connection.describe()` for the failing object
+- [x] **FAIL-02**: Fuzzy-match the failing field name against actual field names using Levenshtein distance (no external vector dependencies)
+- [x] **FAIL-03**: Return top 3 field suggestions ranked by similarity alongside the original error message
+- [x] **FAIL-04**: Update schema cache with the fresh describe result from the failure recovery path
 
 ### Relationship Graph
 
@@ -136,10 +136,10 @@ Deferred to future milestones.
 | ACCH-01 | Phase 12 | Validated |
 | ACCH-02 | Phase 12 | Validated |
 | ACCH-03 | Phase 12 | Validated |
-| FAIL-01 | Phase 13 | Pending |
-| FAIL-02 | Phase 13 | Pending |
-| FAIL-03 | Phase 13 | Pending |
-| FAIL-04 | Phase 13 | Pending |
+| FAIL-01 | Phase 13 | Validated |
+| FAIL-02 | Phase 13 | Validated |
+| FAIL-03 | Phase 13 | Validated |
+| FAIL-04 | Phase 13 | Validated |
 | RELG-01 | Phase 14 | Pending |
 | RELG-02 | Phase 14 | Pending |
 | RELG-03 | Phase 14 | Pending |
