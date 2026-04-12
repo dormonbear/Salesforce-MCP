@@ -228,7 +228,10 @@ Plans:
   3. The error response includes the original error message plus top 3 field suggestions (e.g., "Did you mean: Amount, AmountPaid__c, AnnualRevenue?")
   4. The fresh describe result from the failure path is stored in the schema cache, making subsequent queries benefit from the auto-describe
   5. The single-flight pattern prevents redundant describe calls when multiple parallel queries fail on the same object simultaneously
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 13-01-PLAN.md — TDD: Levenshtein fuzzy matching + INVALID_FIELD recovery with auto-describe and suggestions
 
 ### Phase 14: Relationship Graph
 **Goal**: The schema cache builds an object relationship graph from describe results and surfaces join/lookup path suggestions when queries touch related objects
