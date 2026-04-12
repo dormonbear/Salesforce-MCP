@@ -4,7 +4,8 @@
 
 - ✅ **v1.0 Fix Concurrent Org Race Condition** - Phase 1 (shipped 2026-04-09)
 - ✅ **v1.1 Eliminate process.chdir() and Enable Tool Parallelism** - Phases 2-5 (shipped 2026-04-11)
-- 🚧 **v1.2 MCP Best Practices Alignment** - Phases 6-9 (in progress)
+- ✅ **v1.2 MCP Best Practices Alignment** - Phases 6-9 (shipped 2026-04-11)
+- 🚧 **v1.3 Smart Schema Cache** - Phases 10-15 (in progress)
 
 ## Phases
 
@@ -91,16 +92,8 @@ Plans:
 
 </details>
 
-### 🚧 v1.2 MCP Best Practices Alignment (In Progress)
-
-**Milestone Goal:** Align with 2025-2026 MCP best practices — complete tool annotations, error recovery guidance, structured output for core tools, and MCP Resources for org discoverability.
-
-- [x] **Phase 6: Tool Annotations** - Complete all 4 annotation hints on every GA tool
-- [ ] **Phase 7: Error Recovery** - Add recovery guidance to top-10 most-used GA tool error messages
-- [ ] **Phase 8: Structured Output** - Middleware pass-through test then outputSchema + structuredContent on 5-8 core tools
-- [ ] **Phase 9: MCP Resources** - Wire provideResources() and implement org list + permissions resources
-
-## Phase Details
+<details>
+<summary>✅ v1.2 MCP Best Practices Alignment (Phases 6-9) — SHIPPED 2026-04-11</summary>
 
 ### Phase 6: Tool Annotations
 
@@ -167,9 +160,89 @@ Plans:
 - [x] 09-01-PLAN.md — Wire registerResourcesFromProviders() infrastructure and PermissionService on Services
 - [x] 09-02-PLAN.md — Implement OrgListResource and OrgPermissionsResource in mcp-provider-dx-core
 
+</details>
+
+### 🚧 v1.3 Smart Schema Cache (In Progress)
+
+**Milestone Goal:** Reduce AI SOQL query failures through progressive schema caching, auto-correction on failure, and relationship graph suggestions.
+
+- [ ] **Phase 10: Schema Cache Foundation** - Per-org cache infrastructure with TTL, LRU eviction, and single-flight coalescing
+- [ ] **Phase 11: Schema Discovery Tool** - Implement salesforce_describe_object with cache-first behavior
+- [ ] **Phase 12: Auto-Cache on Success** - Side-effect caching of object/field metadata from successful SOQL queries
+- [ ] **Phase 13: Failure Recovery** - Auto-describe on INVALID_FIELD errors with fuzzy field suggestions
+- [ ] **Phase 14: Relationship Graph** - Extract and surface join/lookup path suggestions from describe results
+- [ ] **Phase 15: Query History** - Ring buffer storage with list_query_history tool
+
+## Phase Details
+
+### Phase 10: Schema Cache Foundation
+**Goal**: A per-org, TTL-aware, LRU-bounded schema cache exists as a service accessible to all tools, with concurrent describe requests coalesced into single API calls
+**Depends on**: Phase 9
+**Requirements**: SINF-01, SINF-02, SINF-03, SINF-04
+**Success Criteria** (what must be TRUE):
+  1. Schema data for org A is never returned when querying org B — per-org isolation verified with two orgs sharing an alias
+  2. A cached entry automatically becomes a cache miss after the configured TTL expires (default 1 hour, overridable via SF_SCHEMA_CACHE_TTL_MINUTES)
+  3. The cache accepts and stores three distinct data types: full describe results, partial field lists, and relationship graph edges
+  4. Ten concurrent describe requests for the same object on the same org result in exactly one API call (single-flight pattern verified by test)
+  5. Cache size remains bounded — LRU eviction prevents unbounded memory growth regardless of how many objects are described
+**Plans**: TBD
+
+### Phase 11: Schema Discovery Tool
+**Goal**: AI agents can explicitly inspect any Salesforce object's schema before writing queries, with results served from cache when available
+**Depends on**: Phase 10
+**Requirements**: DISC-04, DISC-05, DISC-06
+**Success Criteria** (what must be TRUE):
+  1. Calling salesforce_describe_object returns field metadata (name, label, type, filterable, updateable), relationships, and record key prefix for any valid sObject
+  2. A second call for the same object within TTL returns cached data with source metadata indicating cache hit, age, and full/partial indicator
+  3. The tool's description text recommends (not forces) describing unfamiliar objects before querying — visible in tool listing
+**Plans**: TBD
+
+### Phase 12: Auto-Cache on Success
+**Goal**: Every successful SOQL query progressively enriches the schema cache with zero additional API calls, building a knowledge base of known-valid fields
+**Depends on**: Phase 11
+**Requirements**: ACCH-01, ACCH-02, ACCH-03
+**Success Criteria** (what must be TRUE):
+  1. After a successful SOQL query, the queried object name and field names appear in the schema cache as a partial entry — no extra network call is made
+  2. The SOQL parser correctly extracts the FROM object and SELECT fields from flat queries, and gracefully skips complex queries (subqueries, GROUP BY, TYPEOF) without error
+  3. When a partial cache entry exists and a full describe is later performed, the full describe result takes precedence on conflict while preserving any extra partial-only data
+**Plans**: TBD
+
+### Phase 13: Failure Recovery
+**Goal**: When a SOQL query fails with an invalid field error, the system automatically describes the object and returns fuzzy-matched field suggestions alongside the error
+**Depends on**: Phase 12
+**Requirements**: FAIL-01, FAIL-02, FAIL-03, FAIL-04
+**Success Criteria** (what must be TRUE):
+  1. On INVALID_FIELD SOQL error, connection.describe() is automatically called for the failing object without manual intervention
+  2. The failing field name is fuzzy-matched against actual field names using Levenshtein distance, with results ranked by similarity
+  3. The error response includes the original error message plus top 3 field suggestions (e.g., "Did you mean: Amount, AmountPaid__c, AnnualRevenue?")
+  4. The fresh describe result from the failure path is stored in the schema cache, making subsequent queries benefit from the auto-describe
+  5. The single-flight pattern prevents redundant describe calls when multiple parallel queries fail on the same object simultaneously
+**Plans**: TBD
+
+### Phase 14: Relationship Graph
+**Goal**: The schema cache builds an object relationship graph from describe results and surfaces join/lookup path suggestions when queries touch related objects
+**Depends on**: Phase 13
+**Requirements**: RELG-01, RELG-02, RELG-03
+**Success Criteria** (what must be TRUE):
+  1. When an object is described, its referenceTo[] and relationshipName fields are extracted and stored as typed relationship edges
+  2. Relationship edges are stored as { from, to, via, type: 'lookup' | 'master-detail' } in the per-org cache alongside the describe data
+  3. When a query touches an object that has known relationships to other cached objects, the response includes join/lookup path suggestions (e.g., "Contact.AccountId -> Account: use Account.Name for parent lookup")
+**Plans**: TBD
+
+### Phase 15: Query History
+**Goal**: Recent successful SOQL queries are retained per org and accessible to AI agents for pattern reuse
+**Depends on**: Phase 10
+**Requirements**: QHST-01, QHST-02, QHST-03
+**Success Criteria** (what must be TRUE):
+  1. The N most recent successful SOQL queries per org are stored in a ring buffer (default N=50), with oldest entries automatically overwritten
+  2. The retention limit is configurable via environment variable or server config — changing it takes effect without code changes
+  3. Query history is accessible via a list_query_history tool that returns stored queries with timestamps and object names
+**Plans**: TBD
+**UI hint**: no
+
 ## Progress
 
-**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9
+**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11 → 12 → 13 → 14 → 15
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -182,3 +255,9 @@ Plans:
 | 7. Error Recovery | v1.2 | 2/2 | Complete | 2026-04-11 |
 | 8. Structured Output | v1.2 | 2/2 | Complete | 2026-04-11 |
 | 9. MCP Resources | v1.2 | 2/2 | Complete | 2026-04-11 |
+| 10. Schema Cache Foundation | v1.3 | 0/? | Not started | - |
+| 11. Schema Discovery Tool | v1.3 | 0/? | Not started | - |
+| 12. Auto-Cache on Success | v1.3 | 0/? | Not started | - |
+| 13. Failure Recovery | v1.3 | 0/? | Not started | - |
+| 14. Relationship Graph | v1.3 | 0/? | Not started | - |
+| 15. Query History | v1.3 | 0/? | Not started | - |

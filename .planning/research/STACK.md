@@ -1,245 +1,193 @@
 # Technology Stack
 
-**Project:** Salesforce MCP Server — v1.2 MCP Best Practices Alignment
-**Researched:** 2026-04-11
-**Confidence:** HIGH (verified against installed SDK 1.18.2 node_modules and 1.29.0 extracted type definitions)
+**Project:** Salesforce MCP Server — v1.3 Smart Schema Cache
+**Researched:** 2026-04-12
+**Confidence:** HIGH (versions verified via npm registry API; existing codebase inspected)
 
 ---
 
-## Verdict: No New Dependencies Required
+## Verdict: Two New Dependencies
 
-All five features (Tool Annotations, structuredContent, MCP Resources, MCP Prompts, logging/setLevel) are fully supported by SDK 1.18.2, which `^1.18.0` already resolves to. Zero new npm packages are needed for this milestone.
-
----
-
-## SDK Version
-
-| Package | Current Constraint | Installed | Latest Stable | Action |
-|---------|-------------------|-----------|---------------|--------|
-| `@modelcontextprotocol/sdk` | `^1.18.0` | 1.18.2 | 1.29.0 | No change needed |
-
-**Why not upgrade to 1.29.0:** None of the five target features require APIs introduced after 1.18.2. The 1.25+ Zod v4 compat layer (`zod-compat`) is not relevant since the project uses Zod v3. The 1.29.0 `registerTool()` signature change (`ZodRawShape` → `ZodRawShapeCompat`) would require TypeScript updates in `mcp-provider-api` with no functional benefit. PROJECT.md explicitly defers SDK v2.0 (still alpha).
+For four features (schema caching, fuzzy field matching, relationship graph, query history), only two new npm packages are needed. The rest builds on `@salesforce/core`'s existing `connection.describe()` API and the existing `cache.ts` utility.
 
 ---
 
-## Feature-by-Feature API Availability (SDK 1.18.2)
+## New Dependencies Required
 
-### 1. Tool Annotations — Complete Remaining Tools
+### Core Technologies
 
-**API:** `ToolAnnotations` type, imported from `@modelcontextprotocol/sdk/types.js`
+| Technology | Version | Purpose | Why Recommended |
+|------------|---------|---------|-----------------|
+| `fuse.js` | `^7.3.0` | Fuzzy field name matching when SOQL fails | Zero-dependency, ESM+CJS dual build, bundled TypeScript types (`dist/fuse.d.ts`), supports weighted keys for field name vs. label matching. The Bitap algorithm handles 1-3 character typos typical of Salesforce field name errors. Node16 `exports` map resolves correctly (`import` → `.mjs`, `require` → `.cjs`). |
+| `lowdb` | `^7.0.1` | Persistent per-org schema cache on disk | Pure ESM (`"type": "module"`) matching the project's own `"type": "module"`. Node16 exports map with `./node` subpath. Bundles TypeScript generics — define your schema type once, full type inference on reads/writes. Atomic writes via temp-file rename. No native bindings, no server process. Engines: `node >=18`, matching project's `node >=20`. |
 
-**All four fields exist in 1.18.2:**
+### Already Available — No New Installs
 
-| Field | Type | Meaning |
-|-------|------|---------|
-| `readOnlyHint` | `boolean?` | Tool does not modify environment state |
-| `destructiveHint` | `boolean?` | Tool may perform destructive/irreversible changes (only meaningful when `readOnlyHint == false`) |
-| `idempotentHint` | `boolean?` | Repeated calls with same args have no additional effect (only meaningful when `readOnlyHint == false`) |
-| `openWorldHint` | `boolean?` | Tool may interact with entities beyond those listed in inputs |
-
-**Current state:** `ToolAnnotations` is already in `McpToolConfig.annotations` in `mcp-provider-api/src/tools.ts` (line 55). `SfMcpServer.registerTool()` passes annotations through unchanged. Three tools have empty annotation objects; multiple tools are missing `destructiveHint`/`idempotentHint`. This is a pure fill-in task — no framework changes needed.
-
-**Integration point:** `mcp-provider-api/src/tools.ts` `McpToolConfig.annotations` field — no changes required.
-
----
-
-### 2. structuredContent (Structured Tool Output)
-
-**API:**
-- `outputSchema?: OutputArgsShape` field in `registerTool()` config
-- `structuredContent` field in `CallToolResult` return value
-
-**How the SDK processes it (verified in `server/mcp.js` line 118–122):**
-1. If tool declares `outputSchema`, the SDK expects `result.structuredContent` in the response
-2. If `structuredContent` is missing, SDK logs a warning
-3. SDK validates `structuredContent` against `outputSchema` via `safeParseAsync`
-
-**MCP backward-compat rule:** Tools returning `structuredContent` MUST also include the serialized JSON as a `text` content item so older clients still receive data. This is a per-tool implementation decision, not enforced by the SDK.
-
-**Current state:** `McpToolConfig<InputArgsShape, OutputArgsShape>` already includes `outputSchema?: OutputArgsShape` (line 53 of `tools.ts`). `SfMcpServer.registerTool()` passes `outputSchema` through to `McpServer.prototype.registerTool`. `calculateResponseCharCount()` in `SfMcpServer` already handles `structuredContent` for telemetry (lines 304–313). The `CallToolResult` type in SDK 1.18.2 includes `structuredContent` as an optional typed field.
-
-**Type note:** Use `type` aliases (not `interface`) for structured output shapes to avoid index signature type errors when assigning to `{ [key: string]: unknown }`.
-
-**Integration point:** Per-tool change only. Framework layer requires no changes.
+| Capability | Source | Notes |
+|------------|--------|-------|
+| Schema metadata fetch | `connection.describe(orgName)` via `@salesforce/core ^8.24.3` | Returns `DescribeSObjectResult` with `fields[]`, `childRelationships[]`, `recordTypeInfos[]`. Already used transitively; hoisted to root `node_modules`. |
+| Levenshtein distance (fallback) | `fast-levenshtein ^3.0.0` | Hoisted to root as transitive dep of `@salesforce/core`. Use when you only need edit distance (not ranked scored results). Lacks TypeScript types natively — add `@types/fast-levenshtein ^0.0.4` as devDep if used standalone. Prefer `fuse.js` for the full fuzzy-rank use case. |
+| In-memory thread-safe cache | `packages/mcp/src/utils/cache.ts` | Existing `Cache` singleton with `@salesforce/core` Mutex. Extend `CacheContents` type to add `schemaCache` key. No new utilities needed for in-memory layer. |
+| Input validation | `zod ^3.25.76` | Already a direct dependency. Use for schema cache entry type guards. |
+| File-system paths | `node:path`, `node:fs/promises` | Node built-ins. Use `node:fs/promises` for cache directory creation before `lowdb` initialization. |
 
 ---
 
-### 3. MCP Resources
+## Package Decision Rationale
 
-**API:** `registerResource()` on `McpServer`, from `@modelcontextprotocol/sdk/server/mcp.js`
+### Why `fuse.js` Over `fast-levenshtein` for Fuzzy Matching
 
-**Two variants:**
-```typescript
-// Static resource at a fixed URI
-registerResource(
-  name: string,
-  uri: string,
-  config: ResourceMetadata,
-  readCallback: (uri: URL, extra) => ReadResourceResult | Promise<ReadResourceResult>
-): RegisteredResource
+`fast-levenshtein` is already in the dependency tree (via `@salesforce/core`) and works for raw edit distance. Use `fuse.js` instead when the goal is ranked, scored, multi-field search:
 
-// Template resource matching a URI pattern
-registerResource(
-  name: string,
-  template: ResourceTemplate,
-  config: ResourceMetadata,
-  readCallback: (uri: URL, variables: Variables, extra) => ReadResourceResult | Promise<ReadResourceResult>
-): RegisteredResourceTemplate
+- SOQL field errors typically show a wrong field name. You want to rank candidates by both `name` and `label`, not just raw distance.
+- `fuse.js` `IFuseOptions.keys` supports `[{ name: 'name', weight: 0.7 }, { name: 'label', weight: 0.3 }]` — single call ranks all candidates.
+- `fuse.js` `threshold: 0.4` gives a calibrated cut-off; `fast-levenshtein` returns raw integers requiring manual normalization per string length.
+- `fuse.js` 7.3.0 is pure ESM/CJS dual build with bundled `.d.ts` — no separate `@types/` install, no interop issues.
+
+### Why `lowdb` Over `node:fs/promises` Directly
+
+You could write JSON directly to disk with `fs/promises.writeFile()`. Use `lowdb` because:
+
+- **Atomic writes built-in:** `lowdb` v7's `JSONFilePreset` writes to a temp file then renames — prevents partial cache files on crash.
+- **In-memory + disk sync:** Reads into memory once at startup, flushes on `db.write()`. No repeated disk reads during a session.
+- **Type-safe generic:** `JSONFilePreset<SchemaCache>` gives full TypeScript inference on `.data` — no `JSON.parse` + type assertion needed.
+- **Per-org isolation is trivial:** One lowdb file per org (keyed by org username) stored under `configService.getDataDir()`.
+
+### Why NOT SQLite / Better-sqlite3
+
+SQLite would support the relationship graph queries well but:
+- Adds a native binding (`better-sqlite3` needs node-gyp / platform binaries)
+- Published npm package must bundle prebuilds or require compile-on-install
+- The graph here is O(hundreds of objects) — JSON is sufficient; graph traversal is in-process
+- Monorepo's `nohoist` pattern makes native modules harder to manage
+
+---
+
+## Integration Points
+
+### Where New Packages Live
+
+Both new deps belong in `packages/mcp-provider-dx-core` (where `run_soql_query.ts` and future `describe_object.ts` live), **not** in `packages/mcp`. The schema cache service is provider-level logic, not server infrastructure.
+
+If the `SchemaService` interface is added to `@dormon/mcp-provider-api`'s `Services`, add both deps to `packages/mcp` as well (since `Services` is constructed there).
+
+### `lowdb` File Location
+
+Use `configService.getDataDir()` (already exposed via `Services.getConfigService().getDataDir()`) as the root for cache files:
+
+```
+{dataDir}/schema-cache/{orgUsername}.json
+{dataDir}/query-history/{orgUsername}.json
 ```
 
-**`ResourceMetadata`** = `Omit<Resource, 'uri' | 'name'>` — includes `title`, `description`, `mimeType`, `annotations`.
+This keeps cache files alongside existing MCP data files and respects per-org isolation.
 
-**`ResourceTemplate`** is a class from `@modelcontextprotocol/sdk/server/mcp.js` accepting a URI template string (e.g., `"salesforce://org/{orgAlias}/info"`) and a `list` callback.
-
-**Capability auto-registration:** `McpServer` automatically calls `server.registerCapabilities({ resources: { listChanged: true } })` when the first resource handler is initialized. The `capabilities: { resources: {} }` in `index.ts` line 182 is therefore redundant but harmless.
-
-**Current state:**
-- `McpResource` and `McpResourceTemplate` abstract classes exist in `mcp-provider-api/src/resources.ts` with correct method signatures matching the SDK
-- `McpProvider.provideResources()` exists but is never called by the server
-- `registry-utils.ts` only calls `provider.provideTools()` — resources are skipped
-- `SfMcpServer` does not expose `registerResource()` — this is correct because resources bypass permission/rate-limit middleware (they are read-only)
-
-**Required framework change:** Add a resource registration loop in `registerToolsets()` (or a new `registerResourcesAndPrompts()` function) in `packages/mcp/src/utils/registry-utils.ts`:
-1. Call `provider.provideResources(services)` for each provider
-2. For each returned `McpResource`, call `server.server.registerResource(...)` (via the underlying `Server` instance, not `SfMcpServer` which doesn't wrap resources) — or expose `registerResource()` on `SfMcpServer`
-3. For each returned `McpResourceTemplate`, call the template variant
-
-**Note:** Resources are read-only by MCP spec. Do not route them through the org permission middleware.
-
----
-
-### 4. MCP Prompts
-
-**API:** `registerPrompt()` on `McpServer`, from `@modelcontextprotocol/sdk/server/mcp.js`
-
-**Signature:**
-```typescript
-registerPrompt<Args extends PromptArgsRawShape>(
-  name: string,
-  config: { title?: string; description?: string; argsSchema?: Args },
-  cb: (args: z.objectOutputType<Args>, extra) => GetPromptResult | Promise<GetPromptResult>
-): RegisteredPrompt
-```
-
-**`PromptArgsRawShape`** (verified in SDK types): `Record<string, ZodType<string, ZodTypeDef, string> | ZodOptional<...>>` — prompt args must be string-typed only (MCP protocol constraint, not SDK constraint). This matches `mcp-provider-api/src/prompts.ts` line 33–35 exactly.
-
-**Capability auto-registration:** `McpServer` automatically calls `server.registerCapabilities({ prompts: { listChanged: true } })` when the first prompt handler is set up.
-
-**Completion helper:** `completable()` from `@modelcontextprotocol/sdk/server/completable.js` is available in 1.18.2. Wraps a Zod string field with an autocomplete callback. Useful for org alias selectors or SObject name fields in Salesforce prompts.
-
-**Current state:**
-- `McpPrompt` abstract class exists in `mcp-provider-api/src/prompts.ts` with correct signatures
-- `McpProvider.providePrompts()` exists but is never called by the server
-- `registry-utils.ts` does not call `providePrompts()`
-
-**Required framework change:** Same as resources — add prompt registration loop to `registry-utils.ts`.
-
-**Do not route prompts through permission middleware.** Prompts are user-invoked templates (the host decides when to call them), not LLM-invoked operations. Rate limiting and org permission checks don't apply.
-
----
-
-### 5. Protocol-level Logging (logging/setLevel)
-
-**API:** `McpServer.sendLoggingMessage()` (delegates to `Server.sendLoggingMessage()`)
-
-**Parameters:**
-```typescript
-sendLoggingMessage(
-  params: { level: LoggingLevel; logger?: string; data: unknown },
-  sessionId?: string
-): Promise<void>
-```
-
-**`LoggingLevel`** values (verified in `types.d.ts` line 26990): `"debug" | "info" | "notice" | "warning" | "error" | "critical" | "alert" | "emergency"`
-
-**How the SDK handles setLevel (verified in `server/index.js` lines 52–59, 137–139, 233–234):**
-1. Client sends `logging/setLevel` request with a `level`
-2. `Server` handles it in `SetLevelRequestSchema` handler — stores per-session level in `_loggingLevels` Map
-3. `Server.sendLoggingMessage()` calls `isMessageIgnored()` which compares message level against stored level by severity order — messages below the threshold are silently dropped
-4. No custom `setLevel` handler needed in application code
-
-**Capability requirement:** `logging: {}` MUST be declared in `ServerCapabilities`. The `McpServer` does NOT auto-register this capability (unlike tools, resources, and prompts). Without it, `sendLoggingMessage()` silently no-ops and `logging/setLevel` requests throw `"Server does not support logging"`.
-
-**Current state:** `index.ts` line 181–183 declares `capabilities: { resources: {} }` but not `logging: {}`. This is the blocker.
-
-**Required changes:**
-1. Add `logging: {}` to `ServerCapabilities` object in `index.ts`
-2. Bridge `@salesforce/core Logger` to MCP logging: hook into Logger's write lifecycle to emit `sendLoggingMessage` calls at the appropriate level
-3. Surface telemetry errors (currently swallowed in empty `catch {}` blocks in `telemetry.ts` lines 137, 145, 155) via `sendLoggingMessage` at `warning` level — this is the "telemetry error visibility" goal
-
-**`@salesforce/core` Logger mapping:**
-
-| `@salesforce/core` Logger level | MCP `LoggingLevel` |
-|--------------------------------|--------------------|
-| `debug` (10) | `"debug"` |
-| `info` (20) | `"info"` |
-| `warn` (40) | `"warning"` |
-| `error` (50) | `"error"` |
-
----
-
-## Changes Required — Summary
-
-| Feature | New Packages | Framework Changes | Per-Tool/Resource/Prompt Work |
-|---------|-------------|-------------------|-------------------------------|
-| Tool Annotations | None | None | Fill annotations on 49 tools |
-| structuredContent | None | None | Add `outputSchema` + return `structuredContent` in core tools |
-| MCP Resources | None | Add resource registration loop in `registry-utils.ts`; expose `registerResource` on `SfMcpServer` or call via `server.server` | Implement `McpResource` subclasses for org info, permissions, connection status |
-| MCP Prompts | None | Add prompt registration loop in `registry-utils.ts` | Implement `McpPrompt` subclasses for common Salesforce operations |
-| logging/setLevel | None | Add `logging: {}` capability in `index.ts`; bridge `@salesforce/core` Logger | None |
-
----
-
-## Error Recovery Guidance — Not a Library, a Pattern
-
-The "error messages with recovery guidance for LLM self-repair" feature requires no new dependencies. It is a writing convention applied during tool error handling:
+### `fuse.js` Call Pattern
 
 ```typescript
-// Instead of bare error text:
-return { isError: true, content: [{ type: 'text', text: 'Deploy failed' }] }
+import Fuse from 'fuse.js';
 
-// Include recovery steps:
-return {
-  isError: true,
-  content: [{
-    type: 'text',
-    text: [
-      'Deploy failed: Component MyClass has compile error on line 5.',
-      '',
-      'Recovery options:',
-      '1. Fix the Apex syntax error in MyClass.cls and retry deploy_metadata',
-      '2. Use retrieve_metadata to get the current server-side version',
-      '3. Run run_apex_test to check for related test failures',
-    ].join('\n')
-  }]
-}
+// fields: DescribeSObjectResult['fields']
+const fuse = new Fuse(fields, {
+  keys: [
+    { name: 'name', weight: 0.7 },
+    { name: 'label', weight: 0.3 },
+  ],
+  threshold: 0.4,
+  includeScore: true,
+});
+
+const suggestions = fuse.search(wrongFieldName).slice(0, 5).map(r => r.item.name);
 ```
 
-Applied to existing error paths in each tool — no framework changes.
+Instantiate `Fuse` per-query (or cache per-object) — construction is O(n) on field count, not a concern for Salesforce objects (typical 50-300 fields).
+
+### `lowdb` Schema Shape
+
+```typescript
+import { JSONFilePreset } from 'lowdb/node';
+
+type FieldMeta = { name: string; label: string; type: string; referenceTo?: string[] };
+type ObjectMeta = { label: string; fields: FieldMeta[]; childRelationships: string[]; cachedAt: number };
+type SchemaCache = { objects: Record<string, ObjectMeta>; version: number };
+
+const db = await JSONFilePreset<SchemaCache>(`${dataDir}/schema-cache/${orgUsername}.json`, {
+  objects: {},
+  version: 1,
+});
+```
 
 ---
 
-## Do NOT Add
+## Installation
 
-| Package | Reason to Exclude |
-|---------|-------------------|
-| `ajv` / `json-schema-typed` | SDK bundles its own JSON Schema validation for `outputSchema`; do not duplicate |
-| `zod-to-json-schema` | SDK bundles this internally (used for `inputSchema`/`outputSchema` → JSON Schema conversion) |
-| `express` / `hono` / SSE/StreamableHTTP transport | stdio only; out of scope per PROJECT.md |
-| `@modelcontextprotocol/sdk` v2.0.x alpha | Explicitly out of scope per PROJECT.md |
-| `winston` / `pino` | MCP logging uses the protocol's `sendLoggingMessage`; bridge through existing `@salesforce/core` Logger instead |
-| Any Zod v4 package | Project uses Zod v3; Zod v4 compat only relevant if upgrading SDK to 1.25+ |
+Add to `packages/mcp-provider-dx-core/package.json`:
+
+```bash
+yarn workspace @dormon/mcp-provider-dx-core add fuse.js lowdb
+```
+
+If `SchemaService` is added to `mcp-provider-api`'s `Services` interface, also add to `packages/mcp/package.json`:
+
+```bash
+yarn workspace @dormon/salesforce-mcp add fuse.js lowdb
+```
+
+Dev dependency (only if using `fast-levenshtein` directly in tests):
+
+```bash
+yarn workspace @dormon/mcp-provider-dx-core add -D @types/fast-levenshtein
+```
+
+---
+
+## Alternatives Considered
+
+| Recommended | Alternative | When to Use Alternative |
+|-------------|-------------|-------------------------|
+| `fuse.js` | `fast-levenshtein` (already installed) | When you only need raw edit distance integers and don't need ranking — acceptable for a much simpler "did you mean X?" message without scoring |
+| `fuse.js` | `minisearch` | If full-text search across query history content is also needed; heavier API, not worthwhile for field-name-only use case |
+| `lowdb` | `node:fs/promises` direct | If atomic writes are not a concern and codebase already has a JSON read/write utility |
+| `lowdb` | `keyv` + flat-file adapter | Only if you want a unified key-value API across multiple backends; overkill here |
+| `lowdb` | SQLite via `better-sqlite3` | Only if graph traversal queries become complex (e.g., multi-hop relationship lookups) — defer unless graph queries prove insufficient with JSON |
+
+---
+
+## What NOT to Add
+
+| Avoid | Why | Use Instead |
+|-------|-----|-------------|
+| `better-sqlite3` / `@types/better-sqlite3` | Native binding — breaks npm publish portability, requires prebuild per platform, overkill for O(hundreds) objects | `lowdb` JSON |
+| `graphology` / `ngraph` | Graph library — unnecessary abstraction for a relationship map that's just `Record<string, string[]>` adjacency lists | Plain TypeScript object |
+| `redis` / `ioredis` | External process dependency — the MCP server runs as a CLI subprocess with no infra guarantees | `lowdb` in-process file cache |
+| `node-cache` / `lru-cache` | In-memory only — cache lost on server restart, defeating the "progressive caching" goal | `lowdb` (persists to disk) |
+| `@types/fuse.js` | Unnecessary — `fuse.js` 7.3.0 bundles its own `.d.ts` at `dist/fuse.d.ts`, exposed via `exports["."].types` | Nothing; types are bundled |
+| `fastest-levenshtein` | Already transitively available as dep of `fast-levenshtein`; not needed as a direct dep | Use `fuse.js` for the fuzzy ranking use case |
+
+---
+
+## Version Compatibility
+
+| Package | Node | TypeScript | Module System | Notes |
+|---------|------|------------|---------------|-------|
+| `fuse.js@7.3.0` | `>=10` | Bundled types, no `@types/` needed | ESM (`import`) + CJS (`require`) dual build; Node16 exports map present | Safe for project's `"module": "Node16"` tsconfig |
+| `lowdb@7.0.1` | `>=18` | Full generics support | Pure ESM; `./node` subpath for `JSONFilePreset` | Compatible with `"type": "module"` in `mcp-provider-dx-core/package.json` |
+| `@salesforce/core@8.28.1` | latest: 8.28.1; constraint `^8.24.3` resolves to latest | `connection.describe()` returns `Promise<DescribeSObjectResult>` from `@jsforce/jsforce-node@3.10.14` types | — | `DescribeSObjectResult.fields[]` and `DescribeSObjectResult.childRelationships[]` are the raw materials for the cache |
 
 ---
 
 ## Sources
 
-- SDK 1.18.2 type definitions and source: verified in `/packages/mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/`
-- SDK 1.29.0 type definitions: inspected via `npm pack @modelcontextprotocol/sdk@1.29.0` and tar extraction to `/tmp/sdk129/`
-- `@modelcontextprotocol/sdk` latest dist-tag `1.29.0` verified via `npm show @modelcontextprotocol/sdk dist-tags`
-- MCP Tools spec (structuredContent): https://modelcontextprotocol.io/specification/2025-11-25/server/tools
-- TypeScript SDK server docs: https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/server.md
-- Provider API source: `packages/mcp-provider-api/src/` (tools.ts, resources.ts, prompts.ts, provider.ts)
-- Server startup: `packages/mcp/src/index.ts` lines 177–193 (capabilities declaration)
-- SfMcpServer: `packages/mcp/src/sf-mcp-server.ts` (registerTool wrapper, calculateResponseCharCount)
-- Registry utils: `packages/mcp/src/utils/registry-utils.ts` (registerToolsets — no resource/prompt loop)
+- npm registry API: `fuse.js@7.3.0` — version, exports map, TypeScript types confirmed
+- npm registry API: `lowdb@7.0.1` — version, ESM type, `./node` subpath confirmed, engines `node >=18`
+- npm registry API: `@salesforce/core@8.28.1` — `fast-levenshtein` as transitive dep confirmed
+- npm registry API: `@types/fast-levenshtein@0.0.4` — available if needed
+- npm registry API: `write-file-atomic@7.0.1` — not needed; lowdb handles atomicity
+- Codebase inspection: `packages/mcp/src/utils/cache.ts` — existing Cache singleton; `CacheContents` type is the extension point
+- Codebase inspection: `packages/mcp/src/services.ts` — `ConfigService.getDataDir()` is the correct path resolution API
+- Codebase inspection: `packages/mcp-provider-dx-core/src/tools/run_soql_query.ts` — error path already references `salesforce_describe_object`
+- Codebase inspection: `packages/mcp/tsconfig.json` → `@salesforce/dev-config/tsconfig.json` — `"module": "Node16"`, `"moduleResolution": "Node16"` confirmed
+
+---
+*Stack research for: Salesforce MCP Server v1.3 Smart Schema Cache*
+*Researched: 2026-04-12*

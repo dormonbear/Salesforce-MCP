@@ -1,495 +1,578 @@
 # Architecture Research
 
-**Domain:** MCP Server — MCP Best Practices Alignment (v1.2)
-**Researched:** 2026-04-11
-**Confidence:** HIGH (based on direct codebase inspection + MCP SDK docs)
+**Domain:** Salesforce MCP Server — v1.3 Smart Schema Cache
+**Researched:** 2026-04-12
+**Confidence:** HIGH (based on direct codebase inspection; all integration points verified against actual source)
 
 ---
 
-## Existing Architecture Baseline (post-v1.1)
+## Existing Architecture Baseline (post-v1.2)
 
 ```
-index.ts (CLI entry)
-  └─ new SfMcpServer(serverInfo, options)   // capabilities: { resources: {}, tools: {} }
-       └─ registerTool(name, config, cb)    // wraps cb with middleware chain:
+index.ts (CLI entry — McpServerCommand)
+  └─ resolveSymbolicOrgs() → Cache.safeSet('allowedOrgs', ...)
+  └─ new SfMcpServer(serverInfo, options)
+       └─ registerTool(name, config, cb) — middleware chain:
             1. Permission check (targetOrg)
             2. Rate limit check
-            3. Serialized dispatch for lwc-experts (per-tool Mutex)
-            4. await cb(args, extra)         // McpTool.exec()
+            3. Serialized dispatch (lwc-experts Mutex)
+            4. await cb(args, extra)    ← McpTool.exec()
             5. Telemetry emit
-       └─ registerToolsets() in registry-utils.ts
-            └─ McpProvider[] from registry.ts
-                 └─ provideTools(services) → McpTool[]  (all 8 providers)
+  └─ new Services({ telemetry, dataDir, startupFlags, orgPermissions, authorizedOrgs })
+       └─ getOrgService()       — delegates to auth.ts + Cache
+       └─ getTelemetryService() — TelemetryService impl
+       └─ getConfigService()    — dataDir + startupFlags
+       └─ getPermissionService()— org-permissions.ts
+  └─ registerToolsets(...)
+       └─ MCP_PROVIDER_REGISTRY → McpProvider[]
+            └─ DxCoreMcpProvider.provideTools(services) → McpTool[]
+                 └─ QueryOrgMcpTool (run_soql_query)
+                 └─ ... 13 other tools
 ```
 
-`McpResource`, `McpResourceTemplate`, and `McpPrompt` base classes exist in `mcp-provider-api` and `McpProvider.provideResources()` / `providePrompts()` are stubbed, but neither `registerToolsets()` nor any other path in `index.ts` or `registry-utils.ts` calls them. Resources and prompts are defined in the API contract but wired to nothing.
+**Existing `Cache` class** (`packages/mcp/src/utils/cache.ts`):
+- Singleton `Map` keyed by `CacheContents` type (`allowedOrgs: Set<string>`, `tools: ToolInfo[]`)
+- Thread-safe via `Mutex` for `safeGet/safeSet/safeUpdate`
+- Typed: extending it requires modifying `CacheContents` type — this is intentional
 
-Logging capability (`logging: {}`) is absent from the capabilities object passed to `new SfMcpServer()`. The inner `this.server` (an `@modelcontextprotocol/sdk` `Server` instance) is accessible inside `SfMcpServer` and is the object that exposes `sendLoggingMessage()`.
-
----
-
-## Feature Integration Map
-
-### 1. Tool Annotations (Completion)
-
-**What is incomplete:**
-- `create_org_snapshot`, `delete_org`, `create_scratch_org` — `annotations: {}` (empty)
-- All devops tools except `sfDevopsCreateWorkItem` and `sfDevopsUpdateWorkItemStatus` — no `annotations` key at all (10 of 12 tools)
-- Most tools missing `idempotentHint` entirely; `destructiveHint` set on only 4 tools
-
-**Where annotations live:** `McpTool.getConfig()` returns `McpToolConfig.annotations?: ToolAnnotations`. This flows to `server.registerTool(name, config, cb)` unchanged — `SfMcpServer.registerTool()` passes `config` through to `McpServer.prototype.registerTool.call()` at line 274 of `sf-mcp-server.ts`. No middleware touches `annotations`.
-
-**Integration point:** Each provider package's individual tool files. No changes to `SfMcpServer`, `McpTool`, or `mcp-provider-api` needed.
-
-**Rule for all four hints:**
-| Hint | Meaning | Guidance |
-|------|---------|---------|
-| `readOnlyHint` | Tool makes no writes to external state | All query/list/read/test tools |
-| `destructiveHint` | Side effects may be irreversible | delete, deploy with overwrite |
-| `idempotentHint` | Safe to call multiple times with same args | Queries, retrieves, read tools |
-| `openWorldHint` | Tool accesses entities beyond what the server knows about | Default `true` for most; `false` when output is bounded |
-
-**Build effort:** Per-tool annotation review. No architectural change.
+**Key constraint for v1.3:** `Cache` is in `packages/mcp` (server package). Tool implementations live in `packages/mcp-provider-dx-core`. Tools access state only via `Services`. Therefore, any new schema cache capability tools need must be exposed as a new service method on the `Services` interface in `mcp-provider-api`.
 
 ---
 
-### 2. Error Messages with Recovery Guidance
+## System Overview: v1.3 Additions
 
-**Current pattern:** `textResponse(err.message, true)` — plain error strings. The only exception is `deploy_metadata` which already embeds LLM instructions in the timeout error path.
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    packages/mcp (server layer)                       │
+│                                                                      │
+│  SfMcpServer                    Services                             │
+│  └─ registerTool() middleware   └─ getOrgService()                   │
+│       (unchanged)               └─ getTelemetryService()             │
+│                                 └─ getConfigService()                │
+│                                 └─ getPermissionService()            │
+│                                 └─ getSchemaService()  [NEW]         │
+│                                      │                               │
+│  Cache (extended)                    │                               │
+│  └─ allowedOrgs: Set<string>         │                               │
+│  └─ tools: ToolInfo[]                │                               │
+│  └─ schemaCache: OrgSchemaStore [NEW]│                               │
+│       └─ Map<orgId, SchemaCache>  ◄──┘                               │
+│            └─ objects: Map<sObjectType, DescribeSObjectResult>       │
+│            └─ graph: RelationshipGraph                               │
+│            └─ queryHistory: QueryHistoryEntry[]                      │
+├─────────────────────────────────────────────────────────────────────┤
+│              packages/mcp-provider-api (contract layer)              │
+│                                                                      │
+│  Services interface — add SchemaService                  [NEW]       │
+│  SchemaService interface                                 [NEW]       │
+│    getObjectSchema(org, sObjectType)                                 │
+│    cacheFromQuery(org, soql, result)                                 │
+│    describeAndCache(org, sObjectType, connection)                    │
+│    suggestFields(org, sObjectType, badField) → string[]              │
+│    getRelationships(org, sObjectType) → RelationshipEdge[]           │
+│    addQueryHistory(org, entry)                                       │
+│    getQueryHistory(org) → QueryHistoryEntry[]                        │
+│  Types: SObjectSchema, RelationshipGraph, QueryHistoryEntry  [NEW]   │
+├─────────────────────────────────────────────────────────────────────┤
+│         packages/mcp-provider-dx-core (tool layer)                   │
+│                                                                      │
+│  run_soql_query.ts                    [MODIFIED]                     │
+│    success path → cacheFromQuery()                                   │
+│    failure path → describeAndCache() + suggestFields()               │
+│                                                                      │
+│  describe_object.ts (new tool)        [NEW]                          │
+│    calls connection.describe(sObjectType)                            │
+│    stores result via describeAndCache()                              │
+│                                                                      │
+│  soql_query_history.ts (new tool)     [NEW]                          │
+│    calls getQueryHistory()                                           │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
-**Where to change:** Inside each `McpTool.exec()` catch block. The response shape is unchanged (`CallToolResult` with `isError: true, content: [{ type: 'text', text }]`). The text content gains structured guidance.
+---
 
-**Where NOT to change:** `SfMcpServer.registerTool()` middleware error returns (permission denied, rate limit) are not tool errors — they are infrastructure errors that don't benefit from Salesforce-specific recovery hints.
+## Component Responsibilities
 
-**Recommended shared helper location:** `mcp-provider-api` (or a new `packages/mcp-provider-api/src/errors.ts`). A `toolError(message, recovery)` factory consolidates the pattern:
+| Component | Package | Responsibility | New / Modified |
+|-----------|---------|----------------|----------------|
+| `SchemaService` interface | `mcp-provider-api` | Contract for all schema operations | NEW |
+| `SchemaCache` types | `mcp-provider-api` | `SObjectSchema`, `RelationshipGraph`, `QueryHistoryEntry` | NEW |
+| `Services` interface | `mcp-provider-api` | Add `getSchemaService(): SchemaService` | MODIFIED |
+| `OrgSchemaStore` | `packages/mcp/src/utils/schema-cache.ts` | Per-org Map of described objects + graph + query history | NEW |
+| `SchemaServiceImpl` | `packages/mcp/src/schema-service.ts` | Implements `SchemaService`; owns `OrgSchemaStore`; calls `connection.describe()` | NEW |
+| `SoqlParser` | `packages/mcp/src/utils/soql-parser.ts` | Extracts object/field names from a SOQL string | NEW |
+| `FuzzyMatcher` | `packages/mcp/src/utils/fuzzy-matcher.ts` | Edit-distance field name suggestions | NEW |
+| `Cache` (extended) | `packages/mcp/src/utils/cache.ts` | Add `schemaCache` key to `CacheContents` | MODIFIED |
+| `Services` class | `packages/mcp/src/services.ts` | Instantiate and expose `SchemaServiceImpl` | MODIFIED |
+| `run_soql_query` | `mcp-provider-dx-core` | Hook success/failure to `SchemaService` | MODIFIED |
+| `describe_object` (new tool) | `mcp-provider-dx-core` | Call `connection.describe()` + populate cache | NEW |
+| `soql_query_history` (new tool) | `mcp-provider-dx-core` | Read query history from `SchemaService` | NEW |
+
+---
+
+## Recommended Project Structure
+
+New files only (existing structure unchanged):
+
+```
+packages/
+├── mcp-provider-api/src/
+│   ├── schema.ts              # SchemaService interface + all schema types
+│   └── index.ts               # export SchemaService + types (MODIFIED)
+│
+├── mcp/src/
+│   ├── utils/
+│   │   ├── schema-cache.ts    # OrgSchemaStore data structure
+│   │   ├── soql-parser.ts     # SOQL → {objects, fields} extractor
+│   │   └── fuzzy-matcher.ts   # edit-distance field name suggestion
+│   ├── schema-service.ts      # SchemaServiceImpl (implements SchemaService)
+│   └── services.ts            # MODIFIED: instantiate SchemaServiceImpl
+│
+└── mcp-provider-dx-core/src/
+    └── tools/
+        ├── run_soql_query.ts  # MODIFIED: hook success + failure paths
+        ├── describe_object.ts # NEW tool: salesforce_describe_object
+        └── soql_query_history.ts  # NEW tool: salesforce_query_history
+```
+
+**Structure rationale:**
+
+- **`schema.ts` in `mcp-provider-api`:** Tool packages import only from `mcp-provider-api`. Putting the `SchemaService` interface there means `mcp-provider-dx-core` never takes a direct dependency on `packages/mcp`.
+- **`schema-service.ts` in `packages/mcp`:** This is the only package that can hold the singleton `Cache`. The implementation class stays here; the interface is in `mcp-provider-api`.
+- **`utils/schema-cache.ts` separate from `schema-service.ts`:** Data structure and service logic stay separate. `schema-cache.ts` is a plain data container (no async, no connection calls); `schema-service.ts` orchestrates it.
+- **`utils/soql-parser.ts` and `utils/fuzzy-matcher.ts` as independent utils:** Both are pure functions with no external deps. Easy to unit test in isolation. If a third-party SOQL parser is later adopted (e.g. `soql-parser-js`), only `soql-parser.ts` changes.
+
+---
+
+## Architectural Patterns
+
+### Pattern 1: Service Interface in `mcp-provider-api`, Implementation in `packages/mcp`
+
+**What:** Define the `SchemaService` interface in `mcp-provider-api` alongside the existing `OrgService`, `TelemetryService`, etc. Implement it in `packages/mcp/src/schema-service.ts` as `SchemaServiceImpl`. Expose via `Services.getSchemaService()`.
+
+**When to use:** Any capability that tools need access to but that holds state that must live in the server singleton.
+
+**Why this is the right pattern here:** Tools in `mcp-provider-dx-core` already get all services via the `Services` injection. Adding `getSchemaService()` is consistent with how `getOrgService()`, `getTelemetryService()`, etc. work. It avoids direct imports from `packages/mcp` in tool packages, maintaining the unidirectional dependency: `mcp-provider-dx-core` → `mcp-provider-api` ← `packages/mcp`.
 
 ```typescript
-// mcp-provider-api/src/errors.ts
-export function toolError(message: string, recovery?: string): CallToolResult {
-  const text = recovery ? `${message}\n\nRecovery: ${recovery}` : message;
-  return { isError: true, content: [{ type: 'text', text }] };
+// mcp-provider-api/src/schema.ts
+export interface SchemaService {
+  getObjectSchema(orgId: string, sObjectType: string): SObjectSchema | undefined;
+  describeAndCache(orgId: string, sObjectType: string, connection: Connection): Promise<SObjectSchema>;
+  cacheFromSuccessfulQuery(orgId: string, soql: string, records: Record<string, unknown>[]): void;
+  suggestFields(orgId: string, sObjectType: string, badFieldName: string): string[];
+  getRelationships(orgId: string, sObjectType: string): RelationshipEdge[];
+  addQueryHistory(orgId: string, entry: QueryHistoryEntry): void;
+  getQueryHistory(orgId: string, limit?: number): QueryHistoryEntry[];
 }
 ```
 
-All 8 provider packages import from `mcp-provider-api` already; adding this export is non-breaking.
-
-**Integration point:** `mcp-provider-api/src/errors.ts` (new file, exported from `index.ts`) + per-tool catch blocks.
-
 ---
 
-### 3. Structured Output (structuredContent)
+### Pattern 2: Per-Org Cache Isolation via `orgId` Key
 
-**How the SDK wires it:** When `McpToolConfig.outputSchema` is a non-undefined Zod shape, `McpServer.registerTool()` validates `result.structuredContent` against that schema before returning to the client. `SfMcpServer.calculateResponseCharCount()` already handles `structuredContent` (added speculatively at v1.1).
+**What:** All schema data is stored in a `Map<string, OrgSchemaBucket>` keyed by the resolved org username (same identifier used throughout the codebase). Each bucket holds that org's described objects, relationship graph, and query history independently.
 
-**Correct TypeScript pattern (MEDIUM confidence — from SDK docs):**
+**When to use:** Any data that must not bleed between org contexts.
+
+**Why `orgId` (username) not `usernameOrAlias`:** `run_soql_query` receives `usernameOrAlias` from the user. The middleware in `SfMcpServer.registerTool()` injects it as `args.usernameOrAlias` (line 201 of `sf-mcp-server.ts`). At the tool level, this value has already been validated as an authorized org. Use this value directly as the cache partition key. No secondary resolution needed.
+
 ```typescript
-// Use type alias, not interface, for structuredContent assignability
-type OrgListOutput = { orgs: Array<{ alias: string; username: string; instanceUrl: string }> };
+// packages/mcp/src/utils/schema-cache.ts
+export type OrgSchemaBucket = {
+  objects: Map<string, SObjectSchema>;    // key: lowercase sObjectType
+  queryHistory: QueryHistoryEntry[];
+};
 
-getConfig(): McpToolConfig<InputShape, { orgs: z.ZodArray<...> }> {
-  return {
-    outputSchema: { orgs: z.array(z.object({ alias: z.string(), ... })) },
-    ...
-  };
-}
+export class OrgSchemaStore {
+  private readonly buckets = new Map<string, OrgSchemaBucket>();
 
-async exec(): Promise<CallToolResult> {
-  const output: OrgListOutput = { orgs: [...] };
-  return {
-    content: [{ type: 'text', text: JSON.stringify(output) }],  // backward compat
-    structuredContent: output,
-  };
+  getOrCreate(orgId: string): OrgSchemaBucket {
+    if (!this.buckets.has(orgId)) {
+      this.buckets.set(orgId, { objects: new Map(), queryHistory: [] });
+    }
+    return this.buckets.get(orgId)!;
+  }
 }
 ```
 
-**Where to add it:** `McpTool.getConfig()` output already accepts `outputSchema?: OutputArgsShape`. Tools just need to populate it and return `structuredContent` alongside `content`.
-
-**Priority tools** (structured output pays off most where output is consumed programmatically):
-- `salesforce_get_org_info` — already returns structured JSON stringified as text; trivial to add `structuredContent`
-- `run_soql_query` — returns SOQL result as JSON string; schema can mirror `QueryResult<T>` shape
-- `list_all_orgs` — same pattern as `salesforce_get_org_info`
-- `salesforce_describe_object` — returns field descriptions
-
-**Integration point:** Per-tool `getConfig()` and `exec()`. No changes to `SfMcpServer` or `McpTool` base class.
+**Relationship graph storage:** Relationships are derivable from the `DescribeSObjectResult.fields` (each field with `type === 'reference'` has `referenceTo[]`). The graph does not need its own storage slot — `getRelationships(orgId, sObjectType)` computes them on-demand from the already-cached `SObjectSchema`. This avoids a separate graph update step.
 
 ---
 
-### 4. MCP Resources
+### Pattern 3: Intercept run_soql_query at the Tool Level (not Middleware)
 
-**Current state:** `McpResource` and `McpResourceTemplate` classes exist in `mcp-provider-api/src/resources.ts`. `McpProvider.provideResources()` is stubbed. Nothing wires them to the server.
+**What:** `run_soql_query.exec()` branches on success vs failure and calls `SchemaService` accordingly. No changes to `SfMcpServer` middleware.
 
-**What needs to be added:**
+**When to use:** Any Salesforce-domain-specific enrichment that depends on the query content and result.
 
-In `registry-utils.ts`, `createToolRegistryFromProviders()` calls only `provider.provideTools()`. A parallel `createResourceRegistryFromProviders()` (or extending the existing function) must call `provider.provideResources()` and register each result with the server.
+**Why NOT in middleware:** `SfMcpServer.registerTool()` middleware is org-agnostic and domain-agnostic. It handles auth, rate limiting, telemetry — concerns that apply uniformly to all 49+ tools. Schema caching is specific to SOQL queries. Adding it to the middleware would require the middleware to inspect tool names and parse SOQL, which violates its purpose.
 
-**Server registration API (HIGH confidence — SDK docs):**
+**Success path:**
+
 ```typescript
-// For McpResource (static URI):
-server.resource(name, uri, config, readCallback);
-
-// For McpResourceTemplate (dynamic URI pattern):
-server.resource(name, resourceTemplate, config, readCallback);
+// run_soql_query.ts exec() — success branch
+const result = await connection.query(input.query);
+// Best-effort: extract field presence from records (no describe call needed)
+this.services.getSchemaService().cacheFromSuccessfulQuery(
+  input.usernameOrAlias,
+  input.query,
+  result.records
+);
 ```
 
-`SfMcpServer` extends `McpServer`, so these methods are available as `this.resource()` inside `SfMcpServer`, or called from outside as `server.resource(...)`.
+`cacheFromSuccessfulQuery` uses the SOQL parser to extract the sObjectType from the `FROM` clause, then infers field names from the returned record keys. This populates the cache without an extra network call on the happy path.
 
-**Capability flag:** The `index.ts` startup already passes `capabilities: { resources: {} }` — the capability is already declared. No change needed there.
+**Failure path:**
 
-**Where resources should be implemented:**
-- `salesforce://orgs` — static resource listing all authorized orgs with permission levels. Lives in `mcp-provider-dx-core` (it has access to `OrgService`)
-- `salesforce://permissions` — current org permission map. Lives in `mcp-provider-dx-core`
-- `salesforce://connection-status` — connection health. Lives in `mcp-provider-dx-core`
-
-**Registration wiring path:**
-
-```
-registry-utils.ts: registerToolsets()
-  └─ calls registerResourcesFromProviders() [NEW]
-       └─ for each provider: provider.provideResources(services)
-            └─ for each McpResource: server.resource(r.getName(), r.getUri(), r.getConfig(), r.read)
-            └─ for each McpResourceTemplate: server.resource(r.getName(), r.getTemplate(), r.getConfig(), r.read)
-```
-
-`SfMcpServer` does not need to wrap resource reads with middleware (no `targetOrg` injection needed — resources are read-only and org context is baked into the resource URI design). Permission checks for sensitive resource data should be done inside the resource's `read()` implementation.
-
-**Integration points:**
-- `registry-utils.ts` — add resource registration loop
-- `mcp-provider-dx-core` — implement 2-3 concrete `McpResource` subclasses
-- Comment in `McpProvider.provideResources()` and `McpResource` must be updated to remove "NOT CONSUMED YET" note
-
----
-
-### 5. MCP Prompts
-
-**Current state:** `McpPrompt` class exists in `mcp-provider-api/src/prompts.ts`. `McpProvider.providePrompts()` is stubbed. Nothing wires them to the server.
-
-**Server registration API (HIGH confidence — SDK docs):**
 ```typescript
-server.registerPrompt(name, config, promptCallback);
-// config shape: { title?, description?, argsSchema?: ZodObject }
-```
-
-`prompts` capability is NOT currently in the capabilities object at `index.ts:181`. Must add `prompts: {}` alongside `resources: {}` and `tools: {}`.
-
-**Registration wiring path:**
-```
-registry-utils.ts: registerToolsets()
-  └─ calls registerPromptsFromProviders() [NEW]
-       └─ for each provider: provider.providePrompts(services)
-            └─ for each McpPrompt: server.prompt(p.getName(), p.getConfig(), (...args) => p.prompt(...args))
-```
-
-**Where prompts should be implemented:**
-- `deploy-metadata-workflow` — structured prompt for "deploy changed files to org X" with pre-flight checklist. Lives in `mcp-provider-dx-core`
-- `org-setup-checklist` — prompt to guide setting up a scratch org. Lives in `mcp-provider-dx-core`
-- `soql-query-builder` — guided SOQL construction. Lives in `mcp-provider-dx-core`
-
-**Integration points:**
-- `index.ts` — add `prompts: {}` to capabilities object
-- `registry-utils.ts` — add prompt registration loop
-- `mcp-provider-dx-core` — implement 2-3 concrete `McpPrompt` subclasses
-- Comment in `McpProvider.providePrompts()` must be updated
-
----
-
-### 6. Protocol-Level Logging
-
-**SDK API (MEDIUM confidence — from SDK docs and GitHub issues):**
-
-`McpServer` exposes `server.sendLoggingMessage()` (where `server` is the inner `Server` instance accessible as `this.server` inside `SfMcpServer`). The `McpServer`-level convenience wrapper may be `this.sendLoggingMessage()` — needs verification. The inner `this.server.sendLoggingMessage({ level, data })` is confirmed available.
-
-**Capability declaration required:** Add `logging: {}` to the capabilities object in `index.ts`:
-```typescript
-capabilities: {
-  resources: {},
-  prompts: {},   // add for prompts
-  tools: {},
-  logging: {},   // add for logging
+// run_soql_query.ts exec() — catch block (INVALID_FIELD / MALFORMED_QUERY)
+const sfErr = SfError.wrap(error);
+if (isFieldError(sfErr)) {
+  const { sObjectType, badField } = extractFromError(sfErr, input.query);
+  if (sObjectType) {
+    await this.services.getSchemaService().describeAndCache(
+      input.usernameOrAlias, sObjectType, connection
+    );
+    const suggestions = this.services.getSchemaService().suggestFields(
+      input.usernameOrAlias, sObjectType, badField
+    );
+    return toolError(sfErr.message, {
+      recovery: suggestions.length > 0
+        ? `Did you mean: ${suggestions.join(', ')}? Use salesforce_describe_object to list all fields.`
+        : 'Use salesforce_describe_object to list available fields.',
+      category: 'user',
+    });
+  }
 }
 ```
 
-**How logging/setLevel works:** When a connected client sends a `logging/setLevel` request, the SDK's `McpServer` handles it automatically — it tracks the minimum level and suppresses `sendLoggingMessage()` calls below that level. The server does not need to implement a `setRequestHandler` for this.
-
-**Integration into SfMcpServer:**
-
-The `Telemetry` class is the internal observability sink. MCP logging is the external protocol-level sink for the client. They serve different purposes and both should coexist.
-
-Two places to wire MCP logging:
-
-1. **In `SfMcpServer.registerTool()` middleware** — emit `notifications/message` for tool call start/end/error at appropriate levels:
-   ```typescript
-   // Add to SfMcpServer:
-   private sendLog(level: LoggingLevel, data: unknown): void {
-     try {
-       this.server.sendLoggingMessage({ level, data });
-     } catch { /* never fail a tool call over logging */ }
-   }
-   ```
-
-2. **In `Telemetry`'s silent catch blocks** — currently `sendEvent()` and `sendPdpEvent()` have empty catch blocks. The `catch` should emit an MCP `warning` log via `sendLoggingMessage` so clients see telemetry failures without crashing.
-
-**Critical constraint:** `sendLoggingMessage()` must be called only AFTER `server.connect(transport)` — the transport must be established first. In `SfMcpServer`, the `connect()` call happens in `index.ts` after construction. Logging calls inside `registerTool()` callbacks are safe (they run post-connect). Logging calls in the constructor would not be.
-
-**`Logger` (from `@salesforce/core`) already exists** as `this.logger = Logger.childFromRoot('mcp-server')` in `SfMcpServer`. This logger writes to Salesforce's own log infrastructure (not MCP protocol). MCP protocol logging is additive — route significant events to both.
-
-**Integration points:**
-- `index.ts` — add `logging: {}` to capabilities
-- `SfMcpServer` — add `sendLog()` private method; call it in middleware at tool-start, tool-end, tool-error
-- `telemetry.ts` — replace empty catch blocks with `sendLog('warning', ...)` forwarding
+This is additive — the existing `toolError` return is preserved. The describe call is a best-effort enhancement: if it fails, the original error is returned unchanged.
 
 ---
 
-## Component Responsibilities After v1.2
+### Pattern 4: SOQL Parsing — Simple Over Complete
 
-| Component | Current Responsibility | v1.2 Change |
-|-----------|----------------------|-------------|
-| `SfMcpServer.registerTool()` | Auth, rate limit, telemetry middleware | Add `sendLog()` calls for tool lifecycle |
-| `SfMcpServer` constructor | Build server, declare capabilities | Add `logging: {}` to capabilities |
-| `index.ts` | Start server, register toolsets | Add `prompts: {}` to capabilities; call resource/prompt registration |
-| `registry-utils.ts` | Register tools from providers | Add `registerResourcesFromProviders()` and `registerPromptsFromProviders()` |
-| `McpTool.getConfig()` | Return tool config with annotations | Complete `annotations` in all tools; add `outputSchema` for priority tools |
-| `McpTool.exec()` | Execute tool logic; return `CallToolResult` | Return `structuredContent` alongside `content` for priority tools |
-| `McpProvider.provideResources()` | Stub returning `[]` | Override in `DxCoreMcpProvider` to return org/permissions resources |
-| `McpProvider.providePrompts()` | Stub returning `[]` | Override in `DxCoreMcpProvider` to return workflow prompts |
-| `mcp-provider-api/src/errors.ts` | Does not exist | New file: `toolError()` factory for structured error messages |
-| `telemetry.ts` | Silent catch blocks | Forward telemetry failures to MCP logging |
+**What:** `soql-parser.ts` extracts only what the schema cache needs: the primary `FROM` sObjectType and the list of field names in the `SELECT` clause. Not a full SOQL AST.
+
+**When to use:** Any time a SOQL string needs to be inspected for caching purposes.
+
+**Why not a full parser library:** The use case is narrow. We need the `FROM` object name and optionally `SELECT` field names. A regex/split approach handles 95% of real queries. Introducing an npm SOQL parser adds a dependency, parse-edge-cases, and maintenance burden. If parsing fails, the schema service degrades gracefully (skips caching, no error surfaced to user).
+
+```typescript
+// packages/mcp/src/utils/soql-parser.ts
+export type SoqlInfo = {
+  sObjectType: string | null;
+  fields: string[];
+};
+
+export function parseSoql(soql: string): SoqlInfo {
+  // Case-insensitive FROM extraction
+  const fromMatch = soql.match(/\bFROM\s+(\w+)/i);
+  const sObjectType = fromMatch?.[1] ?? null;
+
+  // SELECT field list (stop at FROM)
+  const selectMatch = soql.match(/SELECT\s+(.*?)\s+FROM\b/is);
+  const fields = selectMatch
+    ? selectMatch[1].split(',').map(f => f.trim().split('.').pop()!.toLowerCase())
+    : [];
+
+  return { sObjectType, fields };
+}
+```
+
+**Limitation:** Relationship queries (`Account.Name` style) extract only the terminal field name. Subqueries are ignored. This is intentional — the cache benefits from partial info rather than needing complete accuracy.
 
 ---
 
-## New Components (create from scratch)
+### Pattern 5: Fuzzy Matching — Levenshtein Distance, No External Dep
+
+**What:** `FuzzyMatcher.suggest(candidates, input, maxResults)` returns the closest field names from the cached schema by edit distance. Implemented as a standalone pure function.
+
+**When to use:** SOQL failure path when `INVALID_FIELD` error is returned and the offending field name is extractable.
+
+**Why Levenshtein, no library:** The candidate set is the field list from one sObject — typically 50-200 fields. An O(n * m * k) Levenshtein scan where n=200 fields, m=k≈20 chars is microseconds. No package needed. The field name to match comes from the error message or SOQL parser — it is a short string.
+
+**Maximum suggestions returned:** 3. More than 3 suggestions is noise in a recovery message.
+
+---
+
+## Data Flow
+
+### Flow 1: Successful SOQL Query (new caching side-effect)
+
+```
+run_soql_query.exec(input)
+  └─ connection.query(input.query)             ← @salesforce/core
+       └─ success: QueryResult { records }
+  └─ schemaService.cacheFromSuccessfulQuery(org, soql, records)
+       └─ soqlParser.parseSoql(soql) → { sObjectType, fields }
+       └─ orgSchemaStore.getOrCreate(org)
+            └─ bucket.objects.set(sObjectType, partialSchema(fields))
+       └─ (best-effort: no await, no throw)
+  └─ schemaService.addQueryHistory(org, { soql, timestamp, success: true })
+  └─ return { content, structuredContent }
+```
+
+### Flow 2: Failed SOQL Query (new auto-describe path)
+
+```
+run_soql_query.exec(input)
+  └─ connection.query(input.query)             ← @salesforce/core
+       └─ throws SfError (INVALID_FIELD / MALFORMED_QUERY)
+  └─ catch(error):
+       └─ sfErr = SfError.wrap(error)
+       └─ isFieldError(sfErr)?
+            └─ YES:
+                 └─ extractFromError(sfErr, soql) → { sObjectType, badField }
+                 └─ schemaService.describeAndCache(org, sObjectType, connection)
+                      └─ connection.describe(sObjectType)  ← @salesforce/core
+                      └─ orgSchemaStore stores DescribeSObjectResult
+                 └─ schemaService.suggestFields(org, sObjectType, badField)
+                      └─ fuzzyMatcher.suggest(cachedFields, badField, 3)
+                 └─ toolError(sfErr.message, { recovery: suggestionsText })
+            └─ NO: existing error handling (unchanged)
+  └─ schemaService.addQueryHistory(org, { soql, timestamp, success: false, error: sfErr.message })
+```
+
+### Flow 3: describe_object tool (explicit cache population)
+
+```
+describe_object.exec({ usernameOrAlias, sObjectType })
+  └─ connection = services.getOrgService().getConnection(usernameOrAlias)
+  └─ schemaService.describeAndCache(usernameOrAlias, sObjectType, connection)
+       └─ connection.describe(sObjectType)    ← @salesforce/core
+       └─ orgSchemaStore.getOrCreate(org)
+            └─ bucket.objects.set(sObjectType, fullSchema)
+  └─ return { content: [fieldListText], structuredContent: describedFields }
+```
+
+### Flow 4: Cache Warm-Up at Startup (optional, deferred)
+
+Startup-time pre-warming is out of scope for v1.3. The cache fills lazily from tool calls. Pre-warming would require iterating all allowed orgs and calling `describe()` for common objects — a network-intensive startup path that is deferred to a future milestone.
+
+---
+
+## Integration Points
+
+### New vs Modified: Explicit Inventory
+
+**NEW files (create from scratch):**
 
 | File | Package | Purpose |
 |------|---------|---------|
-| `mcp-provider-api/src/errors.ts` | `mcp-provider-api` | `toolError(message, recovery?)` factory; export from index |
-| `mcp-provider-dx-core/src/resources/org_info_resource.ts` | `mcp-provider-dx-core` | `McpResource` for `salesforce://orgs` |
-| `mcp-provider-dx-core/src/resources/permissions_resource.ts` | `mcp-provider-dx-core` | `McpResource` for `salesforce://permissions` |
-| `mcp-provider-dx-core/src/prompts/deploy_workflow_prompt.ts` | `mcp-provider-dx-core` | `McpPrompt` for deploy workflow |
-| `mcp-provider-dx-core/src/prompts/soql_builder_prompt.ts` | `mcp-provider-dx-core` | `McpPrompt` for SOQL query building |
+| `src/schema.ts` | `mcp-provider-api` | `SchemaService` interface + `SObjectSchema`, `RelationshipEdge`, `QueryHistoryEntry` types |
+| `src/utils/schema-cache.ts` | `packages/mcp` | `OrgSchemaStore`, `OrgSchemaBucket` data structures |
+| `src/utils/soql-parser.ts` | `packages/mcp` | `parseSoql()` — extract sObjectType and fields from SOQL string |
+| `src/utils/fuzzy-matcher.ts` | `packages/mcp` | `suggestFields()` — Levenshtein-based field name suggestions |
+| `src/schema-service.ts` | `packages/mcp` | `SchemaServiceImpl` implementing `SchemaService` |
+| `src/tools/describe_object.ts` | `mcp-provider-dx-core` | `DescribeObjectMcpTool` — `salesforce_describe_object` |
+| `src/tools/soql_query_history.ts` | `mcp-provider-dx-core` | `QueryHistoryMcpTool` — `salesforce_query_history` |
+
+**MODIFIED files (targeted changes to existing files):**
+
+| File | Package | What Changes |
+|------|---------|-------------|
+| `src/index.ts` | `mcp-provider-api` | Export `SchemaService` and related types from `schema.ts` |
+| `src/services.ts` | `mcp-provider-api` | Add `getSchemaService(): SchemaService` to `Services` interface |
+| `src/utils/cache.ts` | `packages/mcp` | Add `schemaStore: OrgSchemaStore` to `CacheContents` type and `initialize()` |
+| `src/services.ts` | `packages/mcp` | Instantiate `SchemaServiceImpl`; expose via `getSchemaService()` |
+| `src/tools/run_soql_query.ts` | `mcp-provider-dx-core` | Add success-path caching + failure-path auto-describe + suggestions |
+| `src/index.ts` | `mcp-provider-dx-core` | Register `DescribeObjectMcpTool` and `QueryHistoryMcpTool` in `provideTools()` |
+| `src/utils/tool-categories.ts` | `packages/mcp` | Register `salesforce_describe_object` and `salesforce_query_history` as `'read'` tools |
+
+**UNCHANGED (confirmed by analysis):**
+
+- `SfMcpServer` — no changes to middleware; schema logic stays in tools
+- `registry-utils.ts` — no new registration mechanisms needed (new tools auto-register via `DxCoreMcpProvider.provideTools()`)
+- `index.ts` (server entry) — no new capabilities needed for schema cache features
+- All other tool files — untouched
 
 ---
 
-## Modified Components (existing files changed)
+## Dependency Direction
 
-| File | Change Type | What Changes |
-|------|-------------|-------------|
-| `packages/mcp/src/index.ts` | Modify | Add `prompts: {}` and `logging: {}` to capabilities; call resource/prompt registration |
-| `packages/mcp/src/sf-mcp-server.ts` | Modify | Add `sendLog()` private method; emit logs in `registerTool()` middleware |
-| `packages/mcp/src/telemetry.ts` | Modify | Replace empty catch blocks with MCP log forwarding |
-| `packages/mcp/src/utils/registry-utils.ts` | Modify | Add resource and prompt registration loops |
-| `packages/mcp-provider-api/src/resources.ts` | Modify | Remove "NOT CONSUMED YET" note |
-| `packages/mcp-provider-api/src/prompts.ts` | Modify | Remove "NOT CONSUMED YET" note |
-| `packages/mcp-provider-api/src/provider.ts` | Modify | Remove "NOT CONSUMED YET" notes |
-| `packages/mcp-provider-api/src/index.ts` | Modify | Export `toolError` from new errors.ts |
-| `packages/mcp-provider-dx-core/src/index.ts` | Modify | Export new resource and prompt classes from `DxCoreMcpProvider.provideResources()` and `providePrompts()` |
-| All provider tool files with `annotations: {}` or missing annotations | Modify | Fill in all four annotation hints |
-| Priority tool files (get_org_info, run_soql_query, etc.) | Modify | Add `outputSchema` and `structuredContent` return |
+```
+mcp-provider-dx-core
+        │
+        ▼ imports
+mcp-provider-api     ← SchemaService interface lives here
+        ▲ implements
+        │
+packages/mcp         ← SchemaServiceImpl, OrgSchemaStore, utils live here
+```
+
+This is the same direction as today. No circular dependencies introduced.
 
 ---
 
-## Data Flow Changes
+## Anti-Patterns to Avoid
 
-### Resource Read Flow (new)
+### Anti-Pattern 1: Putting Schema Cache Logic in Middleware
 
-```
-Client: resources/read request for "salesforce://orgs"
-  └─ McpServer SDK routes to registered handler
-       └─ OrgInfoResource.read(uri, extra)
-            └─ services.getOrgService().getAllowedOrgs()
-            └─ returns ReadResourceResult { contents: [{ uri, text: JSON }] }
-```
+**What people do:** Add describe/caching logic to `SfMcpServer.registerTool()` wrappedCb, checking `if (name === 'run_soql_query')`.
 
-No middleware wrapping. Resource handlers are not wrapped by `SfMcpServer.registerTool()`.
+**Why it's wrong:** The middleware is tool-name-agnostic by design. Domain logic that inspects tool names belongs in the tool, not the middleware. This also makes the middleware harder to test and reason about.
 
-### Prompt Get Flow (new)
+**Do this instead:** Keep schema enrichment in `run_soql_query.exec()`. The middleware calls `exec()` — the tool owns its own enrichment logic.
 
-```
-Client: prompts/get request for "deploy-metadata-workflow"
-  └─ McpServer SDK routes to registered handler
-       └─ DeployWorkflowPrompt.prompt(args, extra)
-            └─ returns GetPromptResult { messages: [...] }
-```
+---
 
-No middleware wrapping. Prompt handlers receive no org context injection.
+### Anti-Pattern 2: Importing from `packages/mcp` in Tool Packages
 
-### Tool Call Flow (modified for logging)
+**What people do:** Import `SchemaServiceImpl` or `OrgSchemaStore` directly in `mcp-provider-dx-core/src/tools/run_soql_query.ts`.
 
-```
-Client: tools/call
-  └─ SfMcpServer.registerTool() wrappedCb
-       └─ sendLog('debug', `Tool ${name} called`)    [NEW]
-       └─ Permission check
-       └─ Rate limit check
-       └─ McpTool.exec(args)
-            └─ return { content, structuredContent }  [structuredContent: NEW]
-       └─ sendLog('info'|'error', ...)               [NEW]
-       └─ Telemetry emit
-       └─ return result
-```
+**Why it's wrong:** Creates a circular dependency (`dx-core` → `mcp` → `dx-core` is the current registry chain). Also breaks the provider abstraction — providers must be usable without the specific server package.
 
-### Error Response Flow (modified for recovery guidance)
+**Do this instead:** Import only from `mcp-provider-api`. All schema types and the `SchemaService` interface live there. The implementation is injected via `Services`.
 
-```
-McpTool.exec() catch block
-  └─ toolError(err.message, 'Try X to recover')  [NEW factory from mcp-provider-api]
-       └─ { isError: true, content: [{ type: 'text', text: 'Error...\n\nRecovery: ...' }] }
-```
+---
+
+### Anti-Pattern 3: Describing on Every Failed Query
+
+**What people do:** Call `connection.describe(sObjectType)` for every SOQL error regardless of error type.
+
+**Why it's wrong:** Many SOQL failures are syntax errors (missing `WHERE` keyword, malformed expressions) where describing the object provides no help and wastes a network round-trip. The error message payload to the LLM is also longer.
+
+**Do this instead:** Describe only on `INVALID_FIELD` errors (Salesforce error code). Parse the error message to extract the bad field name first. If the error is `MALFORMED_QUERY`, return the original error unchanged.
+
+---
+
+### Anti-Pattern 4: Blocking the Success Path on Caching
+
+**What people do:** `await schemaService.cacheFromSuccessfulQuery(...)` in the success path, surfacing cache errors to the caller.
+
+**Why it's wrong:** The query succeeded. Cache population is a side-effect enhancement — if it fails (malformed SOQL that still executed, unusual field types, internal error), the user should receive their query results unchanged.
+
+**Do this instead:** Wrap the caching call in a try/catch that discards errors silently. Never let cache population fail a successful query result.
+
+---
+
+### Anti-Pattern 5: Adding a `Mutex` to `OrgSchemaStore`
+
+**What people do:** Protect `OrgSchemaStore` reads/writes with a `Mutex` for thread safety.
+
+**Why it's wrong (for this use case):** The server runs on Node.js single-threaded event loop. Schema cache writes happen in `async` `exec()` methods. JavaScript's event loop ensures that a single `Map.set()` is atomic. The existing `Cache.mutex` protects `CacheContents` for the allowedOrgs Set (which uses `safeUpdate` for read-modify-write across ticks). Schema writes are pure overwrites (`map.set(key, value)`) — no read-modify-write pattern — so no mutex is needed.
+
+**Do this instead:** Access `OrgSchemaStore` directly without mutex. If future requirements add a read-modify-write pattern (e.g., merging partial schema into existing), revisit at that time.
 
 ---
 
 ## Suggested Build Order
 
-Dependencies drive this order. The `logging` capability and `sendLog()` method are independent and can be done first. Annotations are also independent. Resources and Prompts both require `registry-utils.ts` changes and should be sequenced after the wiring is in place.
+Dependencies constrain this order. The interface contract must exist before the implementation, which must exist before the tool modifications.
 
-### Phase A — Annotations + Error Recovery (no infrastructure changes)
+### Phase 1 — Schema Types and Service Interface (Foundation)
 
-**Rationale:** Pure leaf changes. No new files, no wiring. Can be done with zero risk of breaking existing behavior. Unblocks everything else by getting the "simple" work out first.
+**Files:** `mcp-provider-api/src/schema.ts`, `mcp-provider-api/src/index.ts`, `mcp-provider-api/src/services.ts`
 
-1. Fill in all empty/missing `annotations` in all provider packages (10 devops tools, 3 dx-core tools)
-2. Add `idempotentHint` and complete `destructiveHint` where missing across all providers
-3. Add `mcp-provider-api/src/errors.ts` with `toolError()` factory; export from `index.ts`
-4. Update priority tools to use `toolError()` with recovery hints in catch blocks
+**Rationale:** All downstream work depends on these types. Define `SObjectSchema`, `RelationshipEdge`, `QueryHistoryEntry`, and the `SchemaService` interface first. Update `Services` interface to include `getSchemaService()`. This compiles in isolation.
 
-**No changes to:** `SfMcpServer`, `registry-utils.ts`, `index.ts`, `McpTool` base class
+**Unblocks:** Phases 2 and 3 in parallel.
 
 ---
 
-### Phase B — Structured Output (tool-local, no wiring changes)
+### Phase 2 — Storage and Utility Primitives
 
-**Rationale:** `outputSchema` and `structuredContent` live entirely within each tool. The infrastructure (`calculateResponseCharCount` in `SfMcpServer`) already handles `structuredContent`. Safe to do independently of Resources/Prompts/Logging.
+**Files:** `packages/mcp/src/utils/schema-cache.ts`, `packages/mcp/src/utils/soql-parser.ts`, `packages/mcp/src/utils/fuzzy-matcher.ts`
 
-1. Add `outputSchema` to `getConfig()` in priority tools (get_org_info, run_soql_query, list_all_orgs)
-2. Return `structuredContent` alongside existing `content` in `exec()` for those tools
-3. Verify `calculateResponseCharCount` handles structured output correctly (already does — see sf-mcp-server.ts lines 296–312)
+**Rationale:** Pure data structures and pure functions. No external service calls. All three are independently unit-testable. Write tests first (TDD applies cleanly here — `parseSoql` and `suggestFields` are deterministic pure functions).
 
-**No changes to:** `SfMcpServer.registerTool()` middleware, `McpTool` base class, `registry-utils.ts`
+**Dependency on:** Phase 1 (types from `mcp-provider-api`)
 
 ---
 
-### Phase C — Protocol-Level Logging
+### Phase 3 — SchemaServiceImpl + Cache Extension
 
-**Rationale:** Infrastructure change to `SfMcpServer` and `index.ts`. Must be done before Resources/Prompts to ensure logging works during those operations, but can be done before or after Phase A/B.
+**Files:** `packages/mcp/src/schema-service.ts`, `packages/mcp/src/utils/cache.ts` (modify), `packages/mcp/src/services.ts` (modify)
 
-1. Add `logging: {}` to capabilities in `index.ts`
-2. Add `sendLog()` private method to `SfMcpServer`
-3. Add log calls in `registerTool()` wrappedCb for tool lifecycle events
-4. Replace empty catch blocks in `telemetry.ts` with `sendLog('warning', ...)` forwarding
+**Rationale:** Implement the `SchemaService` interface using Phase 2 primitives. Extend `CacheContents` to hold `OrgSchemaStore`. Wire into `Services` class.
 
-**Dependency:** Phases A and B are independent; Phase C is independent of both
+**Dependency on:** Phases 1 and 2
 
 ---
 
-### Phase D — MCP Resources
+### Phase 4 — describe_object Tool (Standalone New Tool)
 
-**Rationale:** Requires both new resource implementations AND wiring in `registry-utils.ts`. Wire last so implementation is in place before the wiring test.
+**Files:** `mcp-provider-dx-core/src/tools/describe_object.ts`, register in `index.ts`, `tool-categories.ts`
 
-1. Implement `OrgInfoResource` and `PermissionsResource` in `mcp-provider-dx-core/src/resources/`
-2. Override `DxCoreMcpProvider.provideResources()` to return them
-3. Add `registerResourcesFromProviders()` to `registry-utils.ts`
-4. Call it from `registerToolsets()` in `index.ts` flow
-5. Remove "NOT CONSUMED YET" comments from `mcp-provider-api`
+**Rationale:** This tool stands alone — it calls `describeAndCache()` and returns the result. No dependency on query history or fuzzy matching. Can be built and tested independently of `run_soql_query` modifications.
 
-**Dependency:** Phase C (logging) should be complete so resource registration is logged
+**Dependency on:** Phase 3
 
 ---
 
-### Phase E — MCP Prompts
+### Phase 5 — run_soql_query Modifications
 
-**Rationale:** Same pattern as Resources. Requires both prompt implementations AND wiring. Add `prompts: {}` to capabilities first.
+**Files:** `mcp-provider-dx-core/src/tools/run_soql_query.ts`
 
-1. Add `prompts: {}` to capabilities in `index.ts`
-2. Implement `DeployWorkflowPrompt` and `SoqlBuilderPrompt` in `mcp-provider-dx-core/src/prompts/`
-3. Override `DxCoreMcpProvider.providePrompts()` to return them
-4. Add `registerPromptsFromProviders()` to `registry-utils.ts`
-5. Call it from `registerToolsets()` in `index.ts` flow
-6. Remove "NOT CONSUMED YET" comments from `mcp-provider-api`
+**Rationale:** This is the most complex modification. Builds on all prior phases: needs `SchemaService` (Phase 3), `soql-parser` (Phase 2), and `fuzzy-matcher` (Phase 2) to work through `SchemaService`. The existing tests for `run_soql_query` must pass unchanged — the caching side-effects are invisible to callers.
 
-**Dependency:** Phase D (resources wiring is the same pattern; learn from it)
+**Dependency on:** Phases 3 and 4 (the `describe_object` pattern validates `describeAndCache` works end-to-end)
+
+---
+
+### Phase 6 — Query History Tool
+
+**Files:** `mcp-provider-dx-core/src/tools/soql_query_history.ts`, register in `index.ts`, `tool-categories.ts`
+
+**Rationale:** Simplest new tool — reads from `getQueryHistory()`. Can only be meaningful after Phase 5 (which populates history). Register last.
+
+**Dependency on:** Phase 5
 
 ---
 
 ### Dependency Graph
 
 ```
-Phase A (Annotations + Error Recovery)  ←─ no dependencies
-Phase B (Structured Output)              ←─ no dependencies
-Phase C (Logging)                        ←─ no dependencies
-Phase D (Resources)                      ←─ Phase C (recommended)
-Phase E (Prompts)                        ←─ Phase D (same wiring pattern)
+Phase 1 (Interface + Types)
+    │
+    ├─── Phase 2 (Storage + Utils)
+    │         │
+    │         └─── Phase 3 (SchemaServiceImpl + Cache wiring)
+    │                   │
+    │                   ├─── Phase 4 (describe_object tool)
+    │                   │         │
+    │                   │         └─── Phase 5 (run_soql_query modifications)
+    │                   │                   │
+    │                   │                   └─── Phase 6 (query history tool)
+    │                   │
+    │                   └─── (Phase 4 also feeds Phase 5)
 ```
 
-A, B, C are fully parallelizable. D depends on nothing strictly (the SDK will work without logging), but logging makes resource registration observable. E depends on D's wiring pattern being established.
-
----
-
-## Anti-Patterns to Avoid
-
-### Anti-Pattern 1: Wrapping Resources/Prompts with Tool Middleware
-
-**What goes wrong:** Applying `targetOrg` injection and permission middleware (from `registerTool()`) to resource or prompt registration.
-
-**Why it's wrong:** Resources and prompts use different SDK registration methods and different handler signatures. The tool middleware is designed for `CallToolResult` callbacks. Org context for resources should be encoded in the resource URI design (e.g., `salesforce://orgs` reads from the startup-resolved allowlist, not from a per-request `targetOrg`).
-
-**Do this instead:** Register resources and prompts directly via `server.resource()` / `server.registerPrompt()` without wrapping in middleware. Put any access control logic inside the resource/prompt handler itself.
-
----
-
-### Anti-Pattern 2: Logging Before connect()
-
-**What goes wrong:** Calling `this.server.sendLoggingMessage()` in `SfMcpServer`'s constructor or in any code path that runs before `server.connect(transport)`.
-
-**Why it's wrong:** The transport is not established; the notification goes nowhere or throws. The `SfMcpServer` constructor runs before `connect()` is called in `index.ts`.
-
-**Do this instead:** Only call `sendLog()` inside `registerTool()` callbacks (which execute post-connect), or in `oninitialized` handler. Guard with a `connected` flag if needed.
-
----
-
-### Anti-Pattern 3: Declaring outputSchema Without Returning structuredContent
-
-**What goes wrong:** Adding `outputSchema` to a tool's config but not returning `structuredContent` in `exec()`. The SDK validates `structuredContent` against `outputSchema` and will throw a validation error because `undefined` does not match the declared schema.
-
-**Why it's wrong:** `outputSchema` in the config is a contract — the SDK enforces it.
-
-**Do this instead:** Always pair `outputSchema` with a corresponding `structuredContent` return. Use type aliases (not interfaces) for the structured output type for TypeScript assignability.
-
----
-
-### Anti-Pattern 4: Implementing Prompts as Tools
-
-**What goes wrong:** Creating an MCP tool named `build_soql_query_prompt` that returns a text message template, instead of using the MCP Prompts primitive.
-
-**Why it's wrong:** Prompts in MCP are a distinct primitive intended for user-facing interaction templates (client UIs show them differently; some clients have dedicated prompt UIs). Tools are for LLM-callable operations.
-
-**Do this instead:** Use `McpPrompt` with `server.registerPrompt()` for reusable interaction templates. Use tools for actions that query or mutate Salesforce state.
+Phases 1 → 2 → 3 are strictly sequential. Phases 4 and 5 are sequential within the tool chain. Phase 6 is last.
 
 ---
 
 ## Confidence Assessment
 
-| Feature | Confidence | Basis |
-|---------|------------|-------|
-| Annotations — where and what | HIGH | Direct code inspection of all provider packages |
-| structuredContent / outputSchema | MEDIUM | SDK docs (WebFetch); `calculateResponseCharCount` already handles it in code |
-| Resource registration API | HIGH | SDK docs + McpResource class already matches SDK signature |
-| Prompt registration API | HIGH | SDK docs + McpPrompt class already matches SDK signature |
-| registry-utils.ts wiring gap | HIGH | Direct code inspection — `provideResources()`/`providePrompts()` never called |
-| MCP logging / sendLoggingMessage | MEDIUM | GitHub issue #175 confirms `this.server.sendLoggingMessage()`; McpServer-level method existence needs verification |
-| capabilities: prompts absent | HIGH | Direct inspection of `index.ts:181` — only `resources` and `tools` declared |
-| capabilities: logging absent | HIGH | Direct inspection of `index.ts:181` |
+| Area | Confidence | Basis |
+|------|------------|-------|
+| Service interface placement (`mcp-provider-api`) | HIGH | Direct inspection of existing `OrgService`, `TelemetryService` pattern; same unidirectional dependency |
+| Cache extension (`CacheContents`) | HIGH | Direct inspection of `cache.ts` — typed key map, extension pattern is clear |
+| `connection.describe()` availability | HIGH | `@salesforce/core` `Connection` type; used in existing tools for `connection.query()` |
+| Tool-level interception (not middleware) | HIGH | `SfMcpServer.registerTool()` inspected — domain logic has no place there |
+| Levenshtein without library | HIGH | Node.js standard; 50-200 field candidate set is trivially small |
+| SOQL regex parsing sufficiency | MEDIUM | Covers SELECT/FROM/WHERE patterns; subqueries and relationship queries are edge cases |
+| Per-org isolation via username key | HIGH | `usernameOrAlias` is injected by middleware and used uniformly across existing tools |
+| No Mutex needed on `OrgSchemaStore` | HIGH | Single-threaded Node.js event loop; pure `Map.set()` overwrites are atomic |
 
 ---
 
 ## Sources
 
-- Direct inspection: `packages/mcp/src/sf-mcp-server.ts` (lines 1–315)
-- Direct inspection: `packages/mcp/src/index.ts` (lines 177–193, capabilities object)
-- Direct inspection: `packages/mcp/src/utils/registry-utils.ts` (full file — no resource/prompt registration)
-- Direct inspection: `packages/mcp-provider-api/src/resources.ts`, `prompts.ts`, `provider.ts` (NOT CONSUMED YET comments)
-- Direct inspection: `packages/mcp-provider-dx-core/src/tools/*.ts` (14 tools; annotation completeness audit)
-- Direct inspection: `packages/mcp-provider-devops/src/tools/` (12 tools; 10 missing annotations)
-- MCP TypeScript SDK docs (WebFetch): https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/server.md
-- MCP SDK issue #175 (sendLoggingMessage on McpServer): https://github.com/modelcontextprotocol/typescript-sdk/issues/175
+- Direct inspection: `packages/mcp/src/utils/cache.ts` — `CacheContents` type, Mutex pattern
+- Direct inspection: `packages/mcp/src/services.ts` — `Services` class, all four `get*Service()` methods
+- Direct inspection: `packages/mcp/src/sf-mcp-server.ts` — middleware chain, no domain logic
+- Direct inspection: `packages/mcp-provider-api/src/services.ts` — `Services` interface, `OrgService`, `TelemetryService`
+- Direct inspection: `packages/mcp-provider-api/src/index.ts` — export pattern for interfaces and types
+- Direct inspection: `packages/mcp-provider-dx-core/src/tools/run_soql_query.ts` — full exec() flow, existing error handling
+- Direct inspection: `packages/mcp-provider-dx-core/src/index.ts` — `DxCoreMcpProvider.provideTools()` registration
+- Direct inspection: `packages/mcp/src/utils/tool-categories.ts` — `salesforce_describe_object` already in category map as `'read'`
+- Direct inspection: `packages/mcp/src/index.ts` — server startup, Services instantiation
+- `@salesforce/core` `Connection.describe()`: returns `DescribeSObjectResult` (field names, types, reference targets)
 
 ---
 
-*Architecture research for: Salesforce MCP Server — v1.2 MCP Best Practices Alignment*
-*Researched: 2026-04-11*
+*Architecture research for: Salesforce MCP Server — v1.3 Smart Schema Cache*
+*Researched: 2026-04-12*

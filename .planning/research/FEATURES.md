@@ -1,358 +1,201 @@
-# Feature Landscape: MCP Best Practices Alignment (v1.2)
+# Feature Landscape: Smart Schema Cache (v1.3)
 
-**Domain:** MCP Server — protocol compliance and observability improvements
-**Researched:** 2026-04-11
-**Confidence:** HIGH (spec verified against modelcontextprotocol.io 2025-06-18 spec + TypeScript SDK source)
-
----
-
-## What This Milestone Adds
-
-This milestone does not add Salesforce features. It adds MCP protocol compliance features to the server layer: better metadata on tools, better error communication to LLMs, structured return values, new primitives (Resources and Prompts), and protocol-level logging.
-
-All six target features operate on the MCP boundary layer (`packages/mcp` and `packages/mcp-provider-api`). Individual tool packages are touched for annotations and error messages but follow uniform patterns.
+**Domain:** Schema-aware SOQL tool layer for Salesforce MCP server
+**Researched:** 2026-04-12
+**Confidence:** HIGH (codebase inspected directly; Salesforce describe API verified via jsforce docs; patterns verified across Postgres MCP Pro, Microsoft SQL MCP Server, Vanna.ai, text-to-SQL literature)
 
 ---
 
-## How Each Feature Works (Protocol-Level Facts)
+## Context: This Milestone's Scope
 
-### Feature 1: Tool Annotations
-
-**Spec:** Four boolean hints on every tool's `annotations` field (2025-03-26 spec, current).
-
-| Hint | Default | Meaning | Primary client use |
-|------|---------|---------|-------------------|
-| `readOnlyHint` | `false` | Tool does not modify environment | Skip confirmation dialog; safe for autonomous agents |
-| `destructiveHint` | `true` | Modification is irreversible (only applies when readOnlyHint=false) | Trigger confirmation warning |
-| `idempotentHint` | `false` | Calling twice with same args has no extra effect | Safe to retry automatically on transient failure |
-| `openWorldHint` | `true` | Tool reaches external services (network, org APIs) | Used by policy engines to classify tool reach |
-
-**Current state in this codebase:** The `annotations` field is present in `McpTool.getConfig()` return type but partial. 14 of ~20 dx-core files have at least one annotation. Specific gaps found by inspection:
-- `create_org_snapshot.ts` — `annotations: {}` (empty, all defaults apply)
-- `run_apex_test.ts` — has `openWorldHint: true` but missing `readOnlyHint`/`destructiveHint`/`idempotentHint`
-- `run_agent_test.ts` — same gap as run_apex_test
-- `delete_org.ts` — no `readOnlyHint: false` / `destructiveHint: true` explicitly set
-- `assign_permission_set.ts` — has `openWorldHint: true` but missing the other three
-- `resume_tool_operation.ts` — partial
-- `create_scratch_org.ts` — partial
-- 6+ tools in non-dx-core packages (devops, scale-products, metadata-enrichment) need audit
-
-**Correct patterns to apply:**
-```
-Read-only query tools (run_soql_query, list_all_orgs, get_org_info, get_username):
-  readOnlyHint: true, openWorldHint: true
-
-Additive/non-destructive write tools (create_scratch_org, assign_permission_set, deploy_metadata):
-  readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true
-
-Destructive/irreversible tools (delete_org):
-  readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true
-
-Idempotent write tools (retrieve_metadata — overwriting local files):
-  readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true
-```
-
-**Implementation cost:** LOW per tool. No API changes. Pure metadata. Pattern is mechanical once the classification matrix is agreed upon.
-
-**Client behavior change:** Claude Code and ChatGPT Dev Mode suppress confirmation dialogs for `readOnlyHint: true` tools. Without it, Claude Code shows write-tool warnings on every SOQL query — confirmed as the problem this fixes (DEV Community issue: "My MCP Tools Were Showing as Write Tools in ChatGPT Dev Mode").
+v1.3 adds schema intelligence on top of the existing `run_soql_query` tool (already GA) and the `salesforce_describe_object` placeholder (registered in `tool-categories.ts` as a read tool, not yet implemented). All features operate inside `packages/mcp-provider-dx-core` with a new per-org schema cache module. The existing `Cache` class in `packages/mcp/src/utils/cache.ts` handles `allowedOrgs` and `tools` — schema data needs a separate, org-keyed, TTL-aware store.
 
 ---
 
-### Feature 2: Error Messages with Recovery Guidance
+## Domain Survey: How Schema-Aware SQL/SOQL Tools Work
 
-**Problem:** Current pattern is `return textResponse(`Failed to X: ${err.message}`, true)`. When the LLM receives "Failed to deploy metadata: DUPLICATE_DEVELOPER_NAME", it has no recovery path — it cannot determine whether to retry, what to change, or which other tool to call.
+### What the Ecosystem Does (cross-tool patterns)
 
-**Correct pattern (from MCP spec + production evidence):** Return `isError: true` in a `CallToolResult`, but populate the text content with structured recovery guidance. The message should answer: (1) what failed, (2) why it likely failed, (3) what the LLM should do next.
+**Postgres MCP Pro (crystaldba):** Exposes `list_schemas`, `list_objects`, `get_object_details` as discrete read tools. Schema is always fetched on demand — no in-memory cache between calls. Uses tool-based delivery (not MCP Resources) for broader client compatibility. Schema details include columns, constraints, indexes, and foreign key relationships.
 
-Three error categories with patterns:
+**Microsoft SQL MCP Server:** Provides `read_records` with automatic result caching per entity. Schema is embedded in DAB (Data API Builder) entity layer — the MCP server queries against a pre-declared entity model, so schema discovery at query time is not needed. High-confidence schema because it is pre-validated at server startup.
 
-**Category A — Tool ordering / prerequisite failure:**
-```
-Bad:  "Failed to terminate instance: error code 412"
-Good: "Cannot delete org while deployment is in progress.
-       1. Call resume_tool_operation with the pending job ID to check status.
-       2. Wait for the deployment to complete or cancel it.
-       3. Then retry delete_org."
-```
+**Vanna.ai:** Uses a `SchemaCacheEnricher` that calls `get_schema_info()` and stores the result in a dictionary on first access. Cache is populated lazily — first query for an object fetches and stores schema; subsequent queries reuse it. Training data (DDL, documentation, question-SQL pairs) is stored in a vector database and used as RAG context for query generation. The key insight: schema is chunked into bite-sized pieces addressable by the LLM, not dumped wholesale into context.
 
-**Category B — Input validation failure:**
-```
-Bad:  "Invalid parameter: apexTestLevel"
-Good: "Cannot specify both 'apexTests' and 'apexTestLevel' parameters.
-       Use 'apexTests' to list specific test class names, OR use 'apexTestLevel' to
-       specify a level (RunLocalTests, RunAllTestsInOrg). Remove one of the two."
-```
+**Oracle NL2SQL Agent:** Performs schema search (semantic matching on column/table names), data sampling, and read-only SQL execution as separate steps. Schema search is a first-class operation — the LLM is expected to call it before writing queries on unfamiliar objects.
 
-**Category C — Unknown/transient failure:**
-```
-Bad:  "Failed to run SOQL query: ECONNRESET"
-Good: "Salesforce org connection was reset (ECONNRESET). This is usually transient.
-       Retry the same query. If this is the third attempt, check org connectivity
-       using get_org_info before retrying."
-```
+**Common pattern across all:** Schema discovery is always gated — the LLM calls a tool to get schema context before writing queries. None of these systems force the LLM to guess field names. The difference is whether schema is fetched proactively (tool call before query) or reactively (auto-fetched on query failure).
 
-**Current codebase state:** Several tools already have good inline validation messages (deploy_metadata has detailed parameter conflict messages). The gap is in catch blocks where raw `err.message` is passed through. Count: approximately 30 catch blocks across all packages return bare error messages.
+### Salesforce-Specific Context
 
-**Implementation cost:** MEDIUM. Requires reading each tool's error surface and writing domain-appropriate messages. Cannot be automated. Best done tool-by-tool, starting with the 10 highest-frequency tools.
+`@salesforce/core` exposes `connection.describe(objectName)` for single-object schema and `connection.describeGlobal()` for all objects. jsforce (underlying library) has a built-in `describe$()` cached variant that memoizes the result in-process. However: the cache requires explicit invalidation; there is no TTL mechanism; and after org schema changes (field additions, deletions), the cached data is stale until the process restarts.
 
-**SDK compatibility note:** The `isError: true` + no `outputSchema` combination always works. If a tool has an `outputSchema`, a bug in SDK <1.8 (issue #654) prevented `isError: true` responses from bypassing schema validation. This was fixed in SDK PR #655 (merged June 24, 2025). Since this project targets `^1.18.0`, the fix is present.
+SOQL-specific failure modes that schema intelligence directly addresses:
+- `INVALID_FIELD: X is not a field on Y` — field name wrong or does not exist
+- `INVALID_TYPE: X is not supported in this API version` — object availability issue
+- `MALFORMED_QUERY` — syntax error, often includes a position hint but no field suggestion
 
 ---
 
-### Feature 3: Structured Output (structuredContent)
+## Table Stakes (Users Expect These)
 
-**Spec:** Tools may return a `structuredContent` JSON object alongside the `content` text array. If an `outputSchema` (Zod shape) is declared on the tool, the SDK validates `structuredContent` against it. For backward compatibility, the serialized JSON must also appear as a text block.
+These are the baseline for any schema-aware tool layer. Missing them means the AI repeatedly fails on known-fixable SOQL errors.
 
-**SDK pattern (`^1.18.0`):**
-```typescript
-server.registerTool(
-  'run_soql_query',
-  {
-    inputSchema: z.object({ query: z.string(), ... }),
-    outputSchema: z.object({
-      records: z.array(z.record(z.unknown())),
-      totalSize: z.number(),
-      done: z.boolean(),
-    }),
-  },
-  async (args) => {
-    const result = await executeQuery(args);
-    return {
-      content: [{ type: 'text', text: JSON.stringify(result) }], // backward compat
-      structuredContent: result, // machine-parseable
-    };
-  }
-);
-```
-
-**Current state:** `calculateResponseCharCount()` in `sf-mcp-server.ts` already handles `structuredContent` in its character counting (line 304), showing the architecture anticipates it. But no tool actually returns it yet.
-
-**Which tools benefit most from structuredContent:**
-- `run_soql_query` — returns arrays of records; structured output lets agents iterate records directly
-- `list_all_orgs` — returns org list; structured lets agents pick specific orgs without text parsing
-- `get_org_info` — returns a single org object; structured makes field access deterministic
-- `run_apex_test` — returns pass/fail/count; structured allows downstream conditional logic
-
-**Which tools should NOT get outputSchema yet:**
-- Long-text tools (deploy_metadata result blobs) — schema would be overly complex
-- Error-prone tools still using raw err.message — fix error messages first, then add schema
-
-**Implementation cost:** MEDIUM per tool. Requires defining the output shape, ensuring consistency between `content` and `structuredContent`, and writing tests that validate both. The `outputSchema` validation in the SDK is strict — any mismatch throws at runtime.
-
-**Important sequencing:** Add `outputSchema` only to tools that have clean, predictable return structures. Do not add it to tools that return free-form text or where the error path hasn't been cleaned up yet (the isError + outputSchema interaction requires care).
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| `describe_object` tool | All comparable database MCP servers (Postgres MCP Pro, Oracle NL2SQL, Vanna.ai) expose an explicit schema discovery tool. `run_soql_query` already references it in error recovery messages — users see "Use salesforce_describe_object" in errors but the tool doesn't exist yet. | MEDIUM | Placeholder registered in `tool-categories.ts`. Implement using `connection.describe(objectName)`. Return: fields (name, label, type, filterable, updateable), relationships, key prefix. |
+| Per-org schema cache isolation | Multiple orgs have different schemas (sandboxes, scratch orgs, production). A shared cache would bleed prod schema into sandbox queries. The existing `Cache` class is singleton with no org-key partitioning. | MEDIUM | New `SchemaCache` class keyed by org alias/username. Separate from existing `Cache` — different TTL semantics. |
+| TTL-based cache expiration | Salesforce admins add/remove fields. Stale cached schema causes worse failures than no cache (tool confidently suggests a field that no longer exists). jsforce's `describe$()` has no TTL. | MEDIUM | Configurable TTL (default 1 hour). On TTL expiry, cache entry is purged; next access re-fetches. Environment variable override for aggressive environments (e.g., `SF_SCHEMA_CACHE_TTL_MINUTES=5`). |
+| Success query auto-cache | Every successful SOQL query reveals which fields exist on an object. Extracting the object name and queried fields from the query string populates the cache at zero cost — no extra API call. This is the "free schema intel" path. | MEDIUM | Parse the FROM clause of successful queries. Extract queried field names. Store as partial schema entry: `{ objectName, knownFields: string[], cachedAt: Date }`. Not a full describe — just the fields the query used. |
+| Failure auto-describe with field suggestions | When SOQL fails with `INVALID_FIELD`, the error message already references `salesforce_describe_object`. The natural next step — auto-calling describe on failure and returning suggestions — is the difference between "here is an error" and "here is what you probably meant". Every production text-to-SQL system that handles errors does this. | HIGH | On `INVALID_FIELD` error: extract object name, call `connection.describe()`, fuzzy-match the failing field name against actual field names. Return top 3 matches. Levenshtein distance is sufficient — no external library needed. |
 
 ---
 
-### Feature 4: MCP Resources
+## Differentiators (Competitive Advantage)
 
-**Spec:** Resources are application-controlled read-only data sources addressable by URI. They are distinct from tools: the host application (or user) pulls them into context; the LLM does not call them autonomously.
+Features that set this server apart from comparable MCP database tools.
 
-**Protocol mechanics:**
-- Server declares `capabilities: { resources: {} }` (already done in `index.ts` line 182)
-- Client calls `resources/list` → gets URI + name + mimeType list
-- Client calls `resources/read` with a URI → gets text or binary content
-- Optional: `subscribe: true` for change notifications (not needed here)
-
-**Current state:** `McpResource` and `McpResourceTemplate` abstract classes exist in `mcp-provider-api/src/resources.ts` with TODO comments noting the main server does not yet consume them. The server already declares `resources: {}` capability. The wiring is missing: no provider registers resources, and `index.ts` does not call any resource-registration path.
-
-**What resources make sense for this Salesforce MCP server:**
-
-| Resource URI | Content | Use case |
-|---|---|---|
-| `salesforce://orgs` | JSON list of authorized orgs with status | Context for "which orgs can I use?" before tool calls |
-| `salesforce://orgs/{alias}/info` | Org metadata (instance URL, org type, edition) | Context before deciding which tools to run |
-| `salesforce://orgs/{alias}/permissions` | Permission level (read-only, read-write, protected) | Context for "what can I do on this org?" |
-| `salesforce://server/capabilities` | Which toolsets are enabled, server version | Orientation resource for new sessions |
-
-**The `resources: {}` capability is already declared.** The gap is: (1) no `McpResource` implementations exist yet, (2) the main server does not call `server.registerResource()` anywhere, (3) the registry utility (`registerToolsets`) does not have a parallel `registerResources` path.
-
-**Client support reality (2026):** Most clients implement `resources/list` and `resources/read`. Subscriptions are rarely implemented on the client side. Static resources (no template) are universally supported. URI templates have partial client support. Start with static resources only.
-
-**Implementation cost:** MEDIUM. The abstract class infrastructure exists. Need to: (1) create 3-4 concrete `McpResource` implementations, (2) add a `getResources()` method to `McpProvider`, (3) wire registration in `registry-utils.ts`, (4) call `server.registerResource()` for each. The data for these resources is already available (resolved orgs, permissions map, toolset flags) from the startup flow in `index.ts`.
+| Feature | Value Proposition | Complexity | Notes |
+|---------|-------------------|------------|-------|
+| Schema relationship graph (lookup/master-detail) | Postgres MCP Pro returns foreign keys but does not suggest join paths. Salesforce has first-class relationship names (`Contact.Account.Name` traversal syntax). Building a relationship graph enables join suggestions when a query touches multiple objects — no comparable Salesforce MCP server does this. | HIGH | On describe: capture `fields[].referenceTo[]` and `fields[].relationshipName`. Store as `RelationshipEdge { from, to, via, type: 'lookup'|'master-detail' }`. Suggest: when a queried object has lookup to a needed object, surface the relationship name. |
+| Configurable query history retention | Vanna.ai uses query history as training data for better SQL generation. Oracle's NL2SQL Agent uses query logs to improve schema descriptions. Storing recent successful SOQL queries per org lets the AI reuse proven patterns. No other Salesforce MCP tool does this. | MEDIUM | Ring buffer of N most recent successful queries per org (default N=50, configurable). Stored in schema cache file. Surface via a `list_query_history` tool or as an MCP Resource. |
+| Partial schema entries from query success | Unlike full describe (which fetches all 100+ fields), success-path caching stores only fields that were actually queried. This means the cache is populated organically without explicit tool calls — high-value fields accumulate first. | LOW | Straightforward SOQL parse for FROM clause + field list. Already partially needed for success auto-cache (table stakes). The differentiator is exposing this as a "known fields" list in `describe_object` results so the AI knows the cache is partial vs. full. |
+| Cache warm hint in describe_object output | When `describe_object` is called and the result came from cache, indicate age and whether it is a full describe or partial (success-path derived). The AI can then decide whether to force a refresh. | LOW | Add `{ source: 'cache' | 'api', cachedAt: ISO8601, isFull: boolean }` metadata to describe response. |
 
 ---
 
-### Feature 5: MCP Prompts
+## Anti-Features (Commonly Requested, Often Problematic)
 
-**Spec:** Prompts are user-controlled templates that return a `messages` array for direct injection into LLM context. The user explicitly invokes them (e.g., slash commands `/deploy`, `/run-tests`). They encode multi-step workflow sequences that would otherwise require the LLM to improvise.
-
-**Protocol mechanics:**
-- Server declares `capabilities: { prompts: {} }`
-- Client calls `prompts/list` → gets name + description + arguments
-- Client calls `prompts/get` with arguments → gets `messages[]` with role/content pairs
-- Messages can include embedded Resources as context
-
-**Current state:** `McpPrompt` abstract class exists in `mcp-provider-api/src/prompts.ts` with TODO. No concrete implementations exist. The server does not declare `prompts` capability. No wiring in `index.ts`.
-
-**What prompts make sense for this server:**
-
-| Prompt | Arguments | Value |
-|---|---|---|
-| `deploy-to-org` | targetOrg, sourceDir?, runTests? | Pre-flight check → deploy → report results workflow |
-| `run-tests` | targetOrg, testClasses? | Run Apex tests, wait for results, summarize failures |
-| `org-health-check` | targetOrg | Query org info, list recent deployments, surface issues |
-| `query-records` | targetOrg, objectName, fields? | Guided SOQL construction and execution |
-| `scratch-org-setup` | devHub, definitionFile | Create scratch org → assign permissions → deploy metadata |
-
-**The value of prompts here:** The official Salesforce DX MCP server (salesforcecli/mcp) ships 5 prompts and users explicitly reference them as a major usability improvement. The prompt encodes "what tools to call in what order" — preventing the LLM from guessing the workflow and calling tools in the wrong sequence.
-
-**Complexity note:** Unlike resources, prompts require domain knowledge to write well. A `deploy-to-org` prompt must encode the correct pre-flight checks (what validations matter, in what order), handle the async nature of deployments (poll vs. check-status), and surface failures in LLM-actionable format. Writing the prompt _content_ is the hard part, not the protocol wiring.
-
-**Implementation cost:** MEDIUM for wiring (same pattern as resources). HIGH for content quality (domain-specific workflow knowledge needed per prompt). Recommend starting with 2 prompts (deploy + run-tests) that cover the most common workflows, then expanding.
-
----
-
-### Feature 6: Protocol-Level Logging (logging/setLevel)
-
-**Spec (RFC 5424 syslog levels):** debug, info, notice, warning, error, critical, alert, emergency. Client sends `logging/setLevel` request; server responds empty; server sends `notifications/message` at or above the set level.
-
-**SDK mechanics:**
-```typescript
-// Server must be 'Server' class (not McpServer) OR McpServer with logging capability
-const server = new McpServer(
-  { name: 'sf-mcp-server', version: '...' },
-  {
-    capabilities: {
-      resources: {},
-      tools: {},
-      logging: {},     // ← must declare
-    }
-  }
-);
-
-// Anywhere after connect():
-await server.server.sendLoggingMessage({
-  level: 'info',
-  logger: 'tool-executor',
-  data: { tool: name, org: targetOrg, runtimeMs }
-});
-```
-
-**Critical nuance — McpServer vs Server:** `sendLoggingMessage` exists on the low-level `Server` class (`@modelcontextprotocol/sdk/server/index.js`), not on `McpServer` directly. Access it via `server.server` (the wrapped instance). This was a documented SDK confusion point (issue #175, now resolved). The capability MUST be declared or the call throws "Server does not support logging".
-
-**Current state:** `SfMcpServer` extends `McpServer` and uses `Logger.childFromRoot('mcp-server')` from `@salesforce/core` for debug logging. This writes to the `@salesforce/core` log file (if configured) but is invisible to MCP clients. The `capabilities` declaration in `index.ts` currently has `resources: {}` and `tools: {}` but no `logging: {}`.
-
-**What to log at each level:**
-- `debug`: Tool called, args (sanitized), org target
-- `info`: Tool completed, runtime, success/failure summary
-- `warning`: Rate limit approaching, deprecated parameter used, permission downgrade
-- `error`: Tool execution error with recovery context (mirrors the error message sent back)
-
-**Telemetry gap (silent catch blocks):** `telemetry.ts` has try/catch blocks around AppInsights calls that swallow errors silently. With MCP logging, telemetry errors can be surfaced as `warning`-level log messages without crashing the tool. The fix is: replace empty catch with `server.server.sendLoggingMessage({ level: 'warning', ... })`.
-
-**Implementation cost:** LOW for wiring (add `logging: {}` to capabilities, replace `this.logger.debug` with `sendLoggingMessage` calls in `sf-mcp-server.ts`). MEDIUM for the telemetry visibility fix (requires understanding which AppInsights failures are expected vs. unexpected).
-
----
-
-## Table Stakes (Must Ship in v1.2)
-
-| Feature | Why Required | Complexity | Phase Candidate |
-|---------|--------------|------------|-----------------|
-| Complete tool annotations on all 49+ tools | Missing `readOnlyHint` causes write-tool warnings on read-only tools in Claude Code; without this, Claude Code will prompt for confirmation on every SOQL query | LOW per tool, MEDIUM total (audit + classify all tools) | Phase 1 |
-| Error messages with recovery guidance | Current bare `err.message` strings are conversation-killers; LLM cannot self-repair without next-step hints | MEDIUM (requires per-tool domain knowledge) | Phase 2 |
-| Protocol-level logging (`logging/setLevel`) | `--debug` flag is inert for most MCP clients; operators have no observability; telemetry errors are silently swallowed | LOW wiring + MEDIUM telemetry fix | Phase 2 |
-| MCP Resources (org info, permissions) | `resources: {}` capability is already declared but no resources exist — clients see an empty list, making the capability declaration misleading | MEDIUM (infrastructure + 3-4 implementations) | Phase 3 |
-| MCP Prompts (2 core workflows) | Protocol wiring is missing; `McpPrompt` class exists but nothing is registered | MEDIUM wiring + HIGH content per prompt | Phase 3 |
-| structuredContent for core query tools | `calculateResponseCharCount` in sf-mcp-server.ts already handles structuredContent; tools just need to start returning it | MEDIUM per tool | Phase 4 |
-
----
-
-## Differentiators (Set This Server Apart)
-
-| Feature | Value Proposition | Complexity |
-|---------|-------------------|------------|
-| Recovery-aware error messages with tool-ordering hints | When deploy fails, tell the LLM exactly which tool to call next and with what args — very few MCP servers do this well | MEDIUM |
-| Resource annotations with `audience` and `priority` | Telling the host which resources are `["assistant"]` priority lets Claude Code auto-inject them vs. requiring explicit user selection | LOW (add metadata to resource definitions) |
-| Prompt-embedded resource links | Prompts that reference `salesforce://orgs/{alias}/info` as embedded resources so LLMs get org context automatically when invoking a prompt | LOW (within each prompt's message content) |
-| `outputSchema` on structured tools | Enables strict client-side validation and typed downstream processing; only ~5% of MCP servers in the wild do this | MEDIUM per tool |
-
----
-
-## Anti-Features (Do Not Build)
-
-| Anti-Feature | Why Avoid | What to Do Instead |
-|---|---|---|
-| Resources with `subscribe: true` | Org state changes are not real-time; subscriptions would require polling @salesforce/core on a timer; adds complexity for zero client benefit in stdio | Static resources only; return fresh data on each `resources/read` call |
-| Prompt-as-tool (registering prompts as tools so LLM auto-invokes them) | Destroys the user-controlled nature of prompts; loses the "human explicitly selects" guarantee | Keep prompts as prompts; they surface as slash commands in the client |
-| `outputSchema` on all tools immediately | Complex tools (deploy, retrieve) have variable-structure results that don't fit a clean schema; forcing a schema now creates maintenance burden | Add outputSchema incrementally to the 5-8 tools with predictable flat return shapes |
-| Full RFC 5424 log levels in user-facing content | Users don't need `notice`, `alert`, `emergency` for a CLI dev tool | Use debug/info/warning/error; map unexpected states to warning |
-| `listChanged` notifications for resources or prompts | Resources and prompts are static at startup (determined by resolved orgs and enabled toolsets); no events trigger a list change | Omit `listChanged: true` from capabilities; simpler protocol surface |
-| MCP Sampling (server-initiated LLM calls) | This server's model is: agent calls tools, tools return data; the server has no need to make LLM calls itself | Out of scope; no Salesforce workflow requires it |
+| Feature | Why Requested | Why Problematic | Alternative |
+|---------|---------------|-----------------|-------------|
+| Persistent schema cache to disk (SQLite/JSON file) | "Cache survives process restart" sounds useful. | Salesforce schema can change between sessions. A persistent cache creates a hidden source of stale data with no clear invalidation signal. The jsforce issue tracker (#391) shows this causes hard-to-debug `INVALID_FIELD` errors where the cache has fields that were deleted. | In-memory cache with TTL. On process restart, cache is empty — first query re-fetches. Zero stale data risk. |
+| Auto-inject full schema into every query context | Some text-to-SQL tools dump entire DDL into every LLM call. For Salesforce, Account has 100+ fields, Contact has 80+. | Token explosion. A full describe of 10 objects is ~15K tokens of context. Context window consumed, costs increase, latency increases. | Lazy: describe on demand. Cache: reuse in session. Surface: only relevant fields in error recovery. |
+| Fuzzy match using vector embeddings | "Semantic field matching" is appealing — find `Billing_Address` when the user typed `BillingAddr`. | Over-engineering. Salesforce field names follow naming conventions (camelCase API names, human labels). Levenshtein distance at threshold 3 covers 99% of typos. Embeddings require a vector store dependency, model calls, latency, and ongoing maintenance. | Levenshtein distance + case-insensitive exact match on Label. If no match within distance 3, show all fields sorted by similarity score. No external dependencies. |
+| describeGlobal auto-run at startup | Fetches all available objects at startup. Looks like a fast cache warm-up. | Salesforce orgs have 800+ objects (standard + custom). `describeGlobal()` returns names/labels only (no fields), so it is low-value. Full describe of all objects would be 800 API calls — rate limit hit guaranteed. Startup time increases by seconds. | On-demand describe only. Populate cache as queries succeed. |
+| Global (cross-org) schema cache | Shared cache between orgs would reduce API calls for orgs with the same objects. | Orgs differ. Custom fields on Account in org A do not exist in org B. Sandbox orgs frequently diverge from production. Mixing cache entries creates high-confidence wrong suggestions. | Per-org isolation is non-negotiable (already listed in Table Stakes). |
 
 ---
 
 ## Feature Dependencies
 
 ```
-Phase 1: Tool Annotations
-  → No dependencies. Can start immediately. Pure metadata changes.
-  → Prerequisite for: accurate client-side confirmation dialogs (immediate user benefit)
+[Per-org schema cache]
+    └──required by──> [describe_object tool]
+    └──required by──> [Success query auto-cache]
+    └──required by──> [Failure auto-describe + fuzzy match]
+    └──required by──> [Schema relationship graph]
+    └──required by──> [Configurable query history]
 
-Phase 2: Error Messages + Logging
-  → Error messages: no dependencies
-  → Logging wiring: depends on capabilities declaration (trivial 1-line change)
-  → Logging content: benefits from error message improvement being done first
-    (log the same recovery hint in the error message AND as a warning-level log)
+[describe_object tool]
+    └──enables──> [Failure auto-describe] (auto-describe calls same describe logic)
+    └──enables──> [Schema relationship graph] (relationship data comes from describe)
 
-Phase 3: Resources + Prompts
-  → Resources: requires knowing resolved orgs + permissions (already available at startup)
-  → Resources MUST be wired before Prompts if prompts embed resource references
-  → Prompts: can reference resources by URI; resource wiring should come first
-  → Both require: adding getResources()/getPrompts() to McpProvider, wiring in registry-utils.ts
+[Success query auto-cache]
+    └──enhances──> [describe_object tool] (cache hit returns partial data faster)
+    └──precedes──> [Failure auto-describe] (partial cache used as first-pass in failure path)
 
-Phase 4: structuredContent
-  → Depends on error message cleanup (Phase 2): do not add outputSchema to a tool
-    whose catch block still returns bare err.message — the isError path needs to work cleanly
-  → Depends on defining stable output shapes: agree on schemas before implementing
-  → Each tool's structured output is independent of other tools
+[Failure auto-describe + fuzzy match]
+    └──depends on──> [describe_object tool] (must exist to call on failure)
+    └──depends on──> [Per-org schema cache] (check cache before API call)
+
+[Schema relationship graph]
+    └──depends on──> [describe_object tool] (relationship data extracted from describe)
+    └──depends on──> [Per-org schema cache] (graph stored in cache)
+
+[Configurable query history]
+    └──depends on──> [Per-org schema cache] (stored alongside schema entries)
+    └──independent from──> [Schema relationship graph]
 ```
 
----
+### Dependency Notes
 
-## Implementation Complexity Matrix
-
-| Feature | Files Touched | Risk | Notes |
-|---------|---|---|---|
-| Complete annotations (all tools) | ~30-40 `.ts` files across all packages | LOW | Mechanical; no behavior change; test: verify annotations field is populated |
-| Error messages (catch blocks) | ~30 catch blocks, ~15 tools | MEDIUM | Requires domain knowledge per tool; test: verify isError=true + helpful text |
-| logging/setLevel wiring | `index.ts` (1 line), `sf-mcp-server.ts` (replace debug calls) | LOW | Must add `logging: {}` to capabilities or SDK throws |
-| Telemetry error visibility | `telemetry.ts` (silent catch blocks) | MEDIUM | Replace `catch {}` with `sendLoggingMessage` — need to check AppInsights error types |
-| Resources (wiring) | `mcp-provider-api`, `registry-utils.ts`, `index.ts` | MEDIUM | Abstract class exists; need concrete implementations + registration path |
-| Resources (implementations) | New files in `mcp-provider-dx-core` or `mcp` package | LOW | Data already available; just format and return |
-| Prompts (wiring) | Same files as resources, plus capabilities declaration | MEDIUM | No `prompts` capability declared yet — needs adding to `index.ts` |
-| Prompts (content) | New files per prompt | HIGH | Domain-specific; each prompt is a mini workflow specification |
-| structuredContent (core tools) | ~5-8 tool files + their test files | MEDIUM | Must update outputSchema, return shape, and tests in sync |
+- **Per-org schema cache is the foundation:** Every other feature depends on it. It must be designed to hold three data types: full describe results, partial (success-path) results, and relationship graph edges.
+- **describe_object before failure auto-describe:** The failure path calls the same `connection.describe()` logic as the explicit tool. If the tool is not implemented first, the failure path has nowhere to delegate.
+- **Success auto-cache is a free precursor:** It can be added as a side effect inside `run_soql_query.exec()` without a new tool. Parsing the FROM clause on success is low-risk because it only adds data — it never blocks the query result.
+- **Relationship graph is additive:** It can be added after describe_object ships, extracting relationship fields from describe results. The schema cache must be designed to hold edge data from the start.
 
 ---
 
-## Existing Infrastructure Already in Place
+## MVP Definition
 
-These do not need to be built — they just need wiring:
+### Launch With (v1.3.0)
 
-- `McpResource` and `McpResourceTemplate` abstract classes — `mcp-provider-api/src/resources.ts`
-- `McpPrompt` abstract class and `McpPromptConfig` type — `mcp-provider-api/src/prompts.ts`
-- `calculateResponseCharCount()` handles `structuredContent` — `sf-mcp-server.ts` line 293
-- `capabilities: { resources: {} }` already declared — `index.ts` line 182
-- `annotations` field in tool config type — `sf-mcp-server.ts` line 127
-- `isError: true` pattern already used in middleware — multiple locations in `sf-mcp-server.ts`
+Minimum viable for the milestone goal: reduce AI SOQL query failures through schema intelligence.
+
+- [ ] Per-org schema cache (in-memory, TTL-aware, keyed by org alias) — foundation for everything else
+- [ ] `describe_object` tool — implement the placeholder; return fields, types, relationships; use cache
+- [ ] Success query auto-cache — side effect in `run_soql_query`, no new tool, no user-visible API change
+- [ ] Failure auto-describe with fuzzy field matching — upgrade the catch block in `run_soql_query`; auto-call describe on `INVALID_FIELD`; return top 3 fuzzy matches
+
+### Add After Validation (v1.3.x)
+
+Add once core path is working and AI failure rate measurably drops.
+
+- [ ] Schema relationship graph — builds on describe_object; add relationship edge extraction and storage; expose in describe_object response
+- [ ] Configurable query history — ring buffer in schema cache; expose via tool or MCP Resource; trigger: user requests history or AI asks "what queries have succeeded on this org?"
+
+### Future Consideration (v2+)
+
+- [ ] Query history as training data for prompt enrichment — semantic matching against stored queries when writing new SOQL; aligns with Vanna.ai pattern; requires embedding or keyword index
+- [ ] Persistent cache with checksum-based invalidation — store schema to disk with Salesforce org API version as checksum; purge on API version change; requires careful staleness design
+
+---
+
+## Feature Prioritization Matrix
+
+| Feature | User Value | Implementation Cost | Priority |
+|---------|------------|---------------------|----------|
+| Per-org schema cache (in-memory, TTL) | HIGH | MEDIUM | P1 |
+| `describe_object` tool (implement placeholder) | HIGH | MEDIUM | P1 |
+| Success query auto-cache (side effect in run_soql_query) | HIGH | LOW | P1 |
+| Failure auto-describe + fuzzy field suggestions | HIGH | HIGH | P1 |
+| Cache warm hint in describe_object output | LOW | LOW | P2 |
+| Schema relationship graph | MEDIUM | HIGH | P2 |
+| Configurable query history | MEDIUM | MEDIUM | P2 |
+| Query history as RAG training data | LOW | HIGH | P3 |
+| Persistent schema cache | LOW | HIGH | P3 |
+
+---
+
+## Competitor Feature Analysis
+
+| Feature | Postgres MCP Pro | Microsoft SQL MCP | Vanna.ai | Our Approach |
+|---------|-----------------|------------------|---------|--------------|
+| Schema discovery tool | Yes (`get_object_details`) | Pre-declared entity model | Yes (training API) | `describe_object` tool — direct Salesforce describe API |
+| Schema cache | No (always live API) | Implicit in entity model | Yes (SchemaCacheEnricher dictionary) | In-memory per-org cache with TTL |
+| Auto-cache on query success | No | N/A | Via training (manual) | Yes — side effect in `run_soql_query` |
+| Auto-describe on failure | No — returns raw error | N/A | Partial (retrains) | Yes — detect INVALID_FIELD, auto-call describe, return fuzzy matches |
+| Relationship graph | FK keys returned in schema | No | No | Yes — extract from describe response, store relationship edges |
+| Query history | No | No | Yes (training corpus) | Configurable ring buffer per org |
+| Fuzzy field matching | No | No | Partial (via embeddings) | Levenshtein distance + case-insensitive label match |
+
+---
+
+## Implementation Boundary Notes
+
+All new code goes in `packages/mcp-provider-dx-core`:
+- New module: `src/schema/schema-cache.ts` — the per-org TTL cache
+- New module: `src/schema/describe-utils.ts` — wraps `connection.describe()`, populates cache, extracts relationships
+- New module: `src/schema/fuzzy-match.ts` — Levenshtein distance, field suggestion ranking
+- New tool: `src/tools/describe_object.ts` — implements the registered placeholder
+- Modified: `src/tools/run_soql_query.ts` — add success auto-cache side effect + failure auto-describe path
+
+The existing `Cache` class (`packages/mcp/src/utils/cache.ts`) is for server-level data (allowed orgs, tool list). Schema cache is domain-level data and should NOT extend it — separate class, separate location, separate TTL semantics.
 
 ---
 
 ## Sources
 
-- MCP Tools spec (2025-06-18): https://modelcontextprotocol.io/specification/2025-06-18/server/tools
-- MCP Resources spec (2025-06-18): https://modelcontextprotocol.io/specification/2025-06-18/server/resources
-- MCP Prompts spec (2025-06-18): https://modelcontextprotocol.io/specification/2025-06-18/server/prompts
-- MCP Logging spec (2025-03-26): https://modelcontextprotocol.io/specification/2025-03-26/server/utilities/logging
-- Tool Annotations blog post (2026-03-16): https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/
-- TypeScript SDK docs: https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/server.md
-- SDK issue #175 (sendLoggingMessage on McpServer): https://github.com/modelcontextprotocol/typescript-sdk/issues/175
-- SDK issue #654 (structuredContent + isError conflict): https://github.com/modelcontextprotocol/typescript-sdk/issues/654
-- LLM-friendly error messages: https://alpic.ai/blog/better-mcp-tool-call-error-responses-ai-recover-gracefully
-- Resources and Prompts primitives guide: https://dev.to/aws-heroes/mcp-prompts-and-resources-the-primitives-youre-not-using-3oo1
-- Salesforce DX MCP server reference: https://github.com/salesforcecli/mcp
-- Direct code inspection: `packages/mcp/src/sf-mcp-server.ts`, `index.ts`, `mcp-provider-api/src/`
+- Postgres MCP Pro source/docs: https://github.com/crystaldba/postgres-mcp
+- Microsoft SQL MCP Server: https://learn.microsoft.com/en-us/azure/data-api-builder/mcp/overview
+- Vanna.ai schema cache docs: https://vanna.ai/docs/placeholder/context-enrichers + https://medium.com/vanna-ai/how-vanna-works-how-to-train-it-data-security-8d8f2008042
+- Text-to-SQL best practices: https://medium.com/@vi.ha.engr/bridging-natural-language-and-databases-best-practices-for-llm-generated-sql-fcba0449d4e5
+- jsforce describe caching: https://jsforce.github.io/jsforce/doc/connection.js.html (describes `describe$()` cached variant)
+- jsforce INVALID_FIELD re-cache issue: https://github.com/jsforce/jsforce/issues/391
+- Query history for text-to-SQL: https://motherduck.com/research/query-log-informed-schema-descriptions-text-to-sql/
+- MCP error-in-result pattern: https://mcpcat.io/guides/error-handling-custom-mcp-servers/
+- Direct code inspection: `packages/mcp-provider-dx-core/src/tools/run_soql_query.ts`, `packages/mcp/src/utils/cache.ts`, `packages/mcp/src/utils/tool-categories.ts`
 
 ---
-*Feature research for: Salesforce MCP Server v1.2 — MCP Best Practices Alignment*
-*Researched: 2026-04-11*
+*Feature research for: Salesforce MCP Server v1.3 — Smart Schema Cache*
+*Researched: 2026-04-12*
