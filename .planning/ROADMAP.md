@@ -200,7 +200,10 @@ Plans:
   1. Calling salesforce_describe_object returns field metadata (name, label, type, filterable, updateable), relationships, and record key prefix for any valid sObject
   2. A second call for the same object within TTL returns cached data with source metadata indicating cache hit, age, and full/partial indicator
   3. The tool's description text recommends (not forces) describing unfamiliar objects before querying — visible in tool listing
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 11-01-PLAN.md — TDD: Implement salesforce_describe_object tool with cache-first behavior, curated output, and provider wiring
 
 ### Phase 12: Auto-Cache on Success
 **Goal**: Every successful SOQL query progressively enriches the schema cache with zero additional API calls, building a knowledge base of known-valid fields
