@@ -8,17 +8,17 @@ A Model Context Protocol (MCP) server that exposes Salesforce CLI capabilities a
 
 AI agents can safely and efficiently interact with Salesforce orgs through well-defined, permission-controlled MCP tools.
 
-## Current Milestone: v1.2 MCP Best Practices Alignment
+## Current Milestone: v1.3 Smart Schema Cache
 
-**Goal:** Align with 2025-2026 MCP best practices — improve tool metadata, error recovery, structured output, discoverability, and observability.
+**Goal:** Reduce AI SOQL query failures through progressive schema caching, auto-correction on failure, and relationship graph suggestions.
 
 **Target features:**
-- Complete Tool Annotations for all tools (readOnlyHint/destructiveHint/idempotentHint/openWorldHint)
-- Error messages with recovery guidance for LLM self-repair
-- Structured Output (structuredContent) for core tools
-- MCP Resources for org info, permissions, and connection status
-- MCP Prompts for common Salesforce operations
-- Protocol-level logging (logging/setLevel) and telemetry error visibility
+- describe_object tool — recommended (not forced) for unfamiliar objects
+- Success query auto-cache — cache object/field metadata from successful SOQL
+- Failure auto-describe — auto describe on SOQL failure, fuzzy-match field suggestions
+- Schema Graph — build object relationship graph in cache, provide join/lookup suggestions
+- Per-Org cache isolation — separate schema cache per org
+- Query history — configurable retention of SOQL query history
 
 ## Requirements
 
@@ -34,12 +34,12 @@ AI agents can safely and efficiently interact with Salesforce orgs through well-
 
 ### Active
 
-- [ ] Complete Tool Annotations for all tools
-- [ ] Error messages with recovery guidance
-- [ ] Structured Output (structuredContent) for core tools
-- [ ] MCP Resources for org info and permissions
-- [ ] MCP Prompts for common operations
-- [ ] Protocol-level logging and telemetry visibility
+- [ ] describe_object tool for schema discovery
+- [ ] Successful SOQL auto-caches object/field metadata
+- [ ] Failed SOQL auto-describes and fuzzy-matches field suggestions
+- [ ] Schema relationship graph with join/lookup suggestions
+- [ ] Per-org cache isolation
+- [ ] Configurable query history retention
 
 ### Out of Scope
 
@@ -51,14 +51,15 @@ AI agents can safely and efficiently interact with Salesforce orgs through well-
 
 ## Context
 
-- Monorepo with 10 packages (Yarn workspaces, nohoist)
+- Monorepo with 10 packages (Yarn workspaces, nohoist), published as @dormon scope
 - MCP SDK: `@modelcontextprotocol/sdk` ^1.18.0
 - Salesforce core: `@salesforce/core` ^8.24.3
 - v1.0 resolved org names at startup; v1.1 eliminated all process.chdir() and enabled parallel execution
-- 3 tools have empty annotations; multiple tools missing destructiveHint/idempotentHint
-- All tools return plain text only, no structuredContent
-- No MCP Resources or Prompts registered
-- Telemetry has silent empty catch blocks; no MCP logging/setLevel support
+- v1.2 added tool annotations, error recovery, structured output, MCP Resources
+- run_soql_query error message already references `salesforce_describe_object` (not yet implemented)
+- tool-categories.ts already registers `salesforce_describe_object` as a read tool (placeholder)
+- Existing Cache utility class at `packages/mcp/src/utils/cache.ts`
+- `connection.describe()` available via @salesforce/core for schema discovery
 
 ## Constraints
 
@@ -92,4 +93,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-11 after milestone v1.2 initialization*
+*Last updated: 2026-04-12 after milestone v1.3 initialization*

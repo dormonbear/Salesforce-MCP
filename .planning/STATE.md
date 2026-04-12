@@ -1,42 +1,40 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.2
-milestone_name: MCP Best Practices Alignment
-status: complete
-stopped_at: Milestone v1.2 complete — all 4 phases shipped
-last_updated: "2026-04-11T15:00:00.000Z"
-last_activity: 2026-04-11 — Milestone v1.2 complete
+milestone: v1.3
+milestone_name: Smart Schema Cache
+status: defining_requirements
+stopped_at: Defining requirements
+last_updated: "2026-04-12T20:00:00.000Z"
+last_activity: 2026-04-12 — Milestone v1.3 started
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 9
-  completed_plans: 9
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-11)
+See: .planning/PROJECT.md (updated 2026-04-12)
 
 **Core value:** AI agents can safely and efficiently interact with Salesforce orgs through well-defined, permission-controlled MCP tools.
-**Current focus:** Phase 8 — Structured Output
+**Current focus:** Defining requirements for Smart Schema Cache
 
 ## Current Position
 
-Phase: 8 of 9 (Structured Output)
-Plan: — (not yet planned)
-Status: Ready to execute
-Last activity: 2026-04-11 -- Phase 9 planning complete
-
-Progress: [█████░░░░░] 50%
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-12 — Milestone v1.3 started
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 5 (v1.2)
+- Total plans completed: 9 (v1.2)
 
 ## Accumulated Context
 
@@ -64,6 +62,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-11T13:30:00.000Z
-Stopped at: Phase 7 complete — toolError factory + 10 tool migrations done
+Last session: 2026-04-12T20:00:00.000Z
+Stopped at: Milestone v1.3 started — defining requirements
 Resume file: None
