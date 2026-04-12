@@ -241,7 +241,11 @@ Plans:
   1. When an object is described, its referenceTo[] and relationshipName fields are extracted and stored as typed relationship edges
   2. Relationship edges are stored as { from, to, via, type: 'lookup' | 'master-detail' } in the per-org cache alongside the describe data
   3. When a query touches an object that has known relationships to other cached objects, the response includes join/lookup path suggestions (e.g., "Contact.AccountId -> Account: use Account.Name for parent lookup")
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 14-01-PLAN.md — TDD: extractRelationshipEdges pure function + SchemaService.getRelationships/setRelationships wrappers
+- [ ] 14-02-PLAN.md — TDD: Wire edge extraction into describe_object and run_soql_query with relationship suggestions
 
 ### Phase 15: Query History
 **Goal**: Recent successful SOQL queries are retained per org and accessible to AI agents for pattern reuse
