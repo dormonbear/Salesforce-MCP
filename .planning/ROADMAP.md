@@ -170,7 +170,7 @@ Plans:
 - [x] **Phase 11: Schema Discovery Tool** - Implement salesforce_describe_object with cache-first behavior (completed 2026-04-12)
 - [x] **Phase 12: Auto-Cache on Success** - Side-effect caching of object/field metadata from successful SOQL queries
 - [x] **Phase 13: Failure Recovery** - Auto-describe on INVALID_FIELD errors with fuzzy field suggestions
-- [ ] **Phase 14: Relationship Graph** - Extract and surface join/lookup path suggestions from describe results
+- [x] **Phase 14: Relationship Graph** - Extract and surface join/lookup path suggestions from describe results
 - [ ] **Phase 15: Query History** - Ring buffer storage with list_query_history tool
 
 ## Phase Details

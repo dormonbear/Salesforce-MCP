@@ -64,9 +64,9 @@ Requirements for Smart Schema Cache milestone. Reduces AI SOQL query failures th
 
 ### Relationship Graph
 
-- [ ] **RELG-01**: Extract `referenceTo[]` and `relationshipName` from describe results to build relationship edges
-- [ ] **RELG-02**: Store relationship edges as `{ from, to, via, type: 'lookup' | 'master-detail' }` in the per-org cache
-- [ ] **RELG-03**: When a query touches an object with known relationships, surface join/lookup path suggestions in the response
+- [x] **RELG-01**: Extract `referenceTo[]` and `relationshipName` from describe results to build relationship edges
+- [x] **RELG-02**: Store relationship edges as `{ from, to, via, type: 'lookup' | 'master-detail' }` in the per-org cache
+- [x] **RELG-03**: When a query touches an object with known relationships, surface join/lookup path suggestions in the response
 
 ### Query History
 
@@ -140,9 +140,9 @@ Deferred to future milestones.
 | FAIL-02 | Phase 13 | Validated |
 | FAIL-03 | Phase 13 | Validated |
 | FAIL-04 | Phase 13 | Validated |
-| RELG-01 | Phase 14 | Pending |
-| RELG-02 | Phase 14 | Pending |
-| RELG-03 | Phase 14 | Pending |
+| RELG-01 | Phase 14 | Validated |
+| RELG-02 | Phase 14 | Validated |
+| RELG-03 | Phase 14 | Validated |
 | QHST-01 | Phase 15 | Pending |
 | QHST-02 | Phase 15 | Pending |
 | QHST-03 | Phase 15 | Pending |
