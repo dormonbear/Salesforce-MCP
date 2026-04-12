@@ -166,7 +166,7 @@ Plans:
 
 **Milestone Goal:** Reduce AI SOQL query failures through progressive schema caching, auto-correction on failure, and relationship graph suggestions.
 
-- [ ] **Phase 10: Schema Cache Foundation** - Per-org cache infrastructure with TTL, LRU eviction, and single-flight coalescing
+- [x] **Phase 10: Schema Cache Foundation** - Per-org cache infrastructure with TTL, LRU eviction, and single-flight coalescing (completed 2026-04-12)
 - [ ] **Phase 11: Schema Discovery Tool** - Implement salesforce_describe_object with cache-first behavior
 - [ ] **Phase 12: Auto-Cache on Success** - Side-effect caching of object/field metadata from successful SOQL queries
 - [ ] **Phase 13: Failure Recovery** - Auto-describe on INVALID_FIELD errors with fuzzy field suggestions
@@ -189,8 +189,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 10-01-PLAN.md — Schema types + SchemaService with per-org LRU cache, TTL, single-flight coalescing
-- [ ] 10-02-PLAN.md — Disk persistence (save/load/debounce) + DxCoreMcpProvider wiring
+- [x] 10-01-PLAN.md — Schema types + SchemaService with per-org LRU cache, TTL, single-flight coalescing
+- [x] 10-02-PLAN.md — Disk persistence (save/load/debounce) + DxCoreMcpProvider wiring
 
 ### Phase 11: Schema Discovery Tool
 **Goal**: AI agents can explicitly inspect any Salesforce object's schema before writing queries, with results served from cache when available
@@ -260,7 +260,7 @@ Plans:
 | 7. Error Recovery | v1.2 | 2/2 | Complete | 2026-04-11 |
 | 8. Structured Output | v1.2 | 2/2 | Complete | 2026-04-11 |
 | 9. MCP Resources | v1.2 | 2/2 | Complete | 2026-04-11 |
-| 10. Schema Cache Foundation | v1.3 | 0/2 | Planning | - |
+| 10. Schema Cache Foundation | v1.3 | 2/2 | Complete    | 2026-04-12 |
 | 11. Schema Discovery Tool | v1.3 | 0/? | Not started | - |
 | 12. Auto-Cache on Success | v1.3 | 0/? | Not started | - |
 | 13. Failure Recovery | v1.3 | 0/? | Not started | - |
