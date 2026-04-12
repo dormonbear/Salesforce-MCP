@@ -25,3 +25,4 @@ export {
   type SchemaEntry,
 } from './types.js';
 export { parseSoqlFields, type ParsedSoql } from './soql-parser.js';
+export { extractRelationshipEdges } from './relationship-edges.js';

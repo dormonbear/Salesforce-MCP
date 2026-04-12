@@ -148,9 +148,10 @@ describe('extractRelationshipEdges', () => {
     const edges = extractRelationshipEdges('Account', data);
     // 2 outbound (OwnerId→User, ParentId→Account) + 2 inbound (Contact, Opportunity) = 4
     // Task skipped (null relationshipName), Name skipped (empty referenceTo)
+    // ParentId→Account is self-referencing: from='Account' AND to='Account'
     expect(edges).to.have.lengthOf(4);
     expect(edges.filter((e: RelationshipEdge) => e.from === 'Account')).to.have.lengthOf(2); // outbound
-    expect(edges.filter((e: RelationshipEdge) => e.to === 'Account')).to.have.lengthOf(2);   // inbound
+    expect(edges.filter((e: RelationshipEdge) => e.to === 'Account')).to.have.lengthOf(3);   // inbound (2 children + self-ref)
   });
 });
 

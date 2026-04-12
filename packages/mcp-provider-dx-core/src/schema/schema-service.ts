@@ -15,7 +15,7 @@
  */
 
 import { LRUCache } from 'lru-cache';
-import type { SchemaEntry } from './types.js';
+import { SchemaEntryType, type SchemaEntry, type RelationshipEdge, type RelationshipEdgesEntry } from './types.js';
 import { SchemaDiskPersistence } from './disk-persistence.js';
 
 export type SchemaServiceOptions = {
@@ -87,6 +87,26 @@ export class SchemaService {
     cache.set(objectName.toLowerCase(), entry);
     this.notifyMutation(orgUsername);
     this.onMutation?.();
+  }
+
+  private static relationshipKey(objectName: string): string {
+    return `__relationships__${objectName}`;
+  }
+
+  public getRelationships(orgUsername: string, objectName: string): RelationshipEdge[] | undefined {
+    const entry = this.get(orgUsername, SchemaService.relationshipKey(objectName));
+    if (entry?.type === SchemaEntryType.RelationshipEdges) {
+      return (entry as RelationshipEdgesEntry).edges;
+    }
+    return undefined;
+  }
+
+  public setRelationships(orgUsername: string, objectName: string, edges: RelationshipEdge[]): void {
+    this.set(orgUsername, SchemaService.relationshipKey(objectName), {
+      type: SchemaEntryType.RelationshipEdges,
+      edges,
+      cachedAt: Date.now(),
+    } satisfies RelationshipEdgesEntry);
   }
 
   /**
