@@ -33,6 +33,7 @@
 import { McpProvider, McpResource, McpResourceTemplate, McpTool, Services } from '@dormon/mcp-provider-api';
 import { OrgListResource } from './resources/org-list-resource.js';
 import { OrgPermissionsResource } from './resources/org-permissions-resource.js';
+import { SchemaService } from './schema/index.js';
 import { AssignPermissionSetMcpTool } from './tools/assign_permission_set.js';
 import { CreateOrgSnapshotMcpTool } from './tools/create_org_snapshot.js';
 import { CreateScratchOrgMcpTool } from './tools/create_scratch_org.js';
@@ -58,8 +59,15 @@ export {
 } from '@dormon/mcp-provider-api';
 
 export class DxCoreMcpProvider extends McpProvider {
+  private schemaService?: SchemaService;
+  private sigTermRegistered = false;
+
   public getName(): string {
     return 'DxCoreMcpProvider';
+  }
+
+  public getSchemaService(): SchemaService | undefined {
+    return this.schemaService;
   }
 
   public provideResources(services: Services): Promise<(McpResource | McpResourceTemplate)[]> {
@@ -69,8 +77,24 @@ export class DxCoreMcpProvider extends McpProvider {
     ]);
   }
 
-  public provideTools(services: Services): Promise<McpTool[]> {
-    return Promise.resolve([
+  public async provideTools(services: Services): Promise<McpTool[]> {
+    // Create SchemaService singleton with disk persistence
+    const dataDir = services.getConfigService().getDataDir();
+    const schemaService = new SchemaService({ dataDir });
+    this.schemaService = schemaService;
+
+    // Hydrate cache from disk (discards TTL-expired entries)
+    await schemaService.loadFromDisk();
+
+    // Register SIGTERM handler for graceful shutdown (once only)
+    if (!this.sigTermRegistered) {
+      this.sigTermRegistered = true;
+      process.on('SIGTERM', () => {
+        void schemaService.shutdown();
+      });
+    }
+
+    return [
       new AssignPermissionSetMcpTool(services),
       new CreateOrgSnapshotMcpTool(services),
       new CreateScratchOrgMcpTool(services),
@@ -85,6 +109,6 @@ export class DxCoreMcpProvider extends McpProvider {
       new RetrieveMetadataMcpTool(services),
       new TestAgentsMcpTool(services),
       new TestApexMcpTool(services),
-    ]);
+    ];
   }
 }

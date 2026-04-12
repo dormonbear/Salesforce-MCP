@@ -15,6 +15,7 @@
  */
 
 export { SchemaService } from './schema-service.js';
+export { SchemaDiskPersistence } from './disk-persistence.js';
 export {
   SchemaEntryType,
   type FullDescribeEntry,

@@ -16,9 +16,12 @@
 
 import { LRUCache } from 'lru-cache';
 import type { SchemaEntry } from './types.js';
+import { SchemaDiskPersistence } from './disk-persistence.js';
 
 export type SchemaServiceOptions = {
   ttlMs?: number;
+  dataDir?: string;
+  debounceMs?: number;
 };
 
 const DEFAULT_TTL_MS = 3_600_000; // 1 hour
@@ -26,12 +29,13 @@ const MAX_ENTRIES_PER_ORG = 100;
 
 /**
  * In-memory schema cache with per-org LRU isolation, configurable TTL,
- * and single-flight request coalescing.
+ * single-flight request coalescing, and optional disk persistence.
  *
  * - Each org gets its own LRUCache (keyed by canonical username)
  * - Object names are normalized to lowercase for case-insensitive lookups
  * - TTL defaults to 1 hour, overridable via SF_SCHEMA_CACHE_TTL_MINUTES env var or constructor option
  * - describeAndCache deduplicates concurrent API calls for the same org+object
+ * - When dataDir is provided, cache persists to disk with debounced writes
  */
 export class SchemaService {
   public onMutation?: () => void;
@@ -39,6 +43,7 @@ export class SchemaService {
   private readonly orgCaches: Map<string, LRUCache<string, SchemaEntry>>;
   private readonly inFlight: Map<string, Promise<SchemaEntry>>;
   private readonly ttlMs: number;
+  private readonly persistence?: SchemaDiskPersistence;
 
   public constructor(options?: SchemaServiceOptions) {
     this.orgCaches = new Map();
@@ -50,6 +55,15 @@ export class SchemaService {
       this.ttlMs = parseInt(envTtl, 10) * 60_000;
     } else {
       this.ttlMs = options?.ttlMs ?? DEFAULT_TTL_MS;
+    }
+
+    // Initialize disk persistence if dataDir is provided
+    if (options?.dataDir) {
+      this.persistence = new SchemaDiskPersistence({
+        dataDir: options.dataDir,
+        ttlMs: this.ttlMs,
+        debounceMs: options.debounceMs,
+      });
     }
   }
 
@@ -71,6 +85,7 @@ export class SchemaService {
   public set(orgUsername: string, objectName: string, entry: SchemaEntry): void {
     const cache = this.getOrCreateOrgCache(orgUsername);
     cache.set(objectName.toLowerCase(), entry);
+    this.notifyMutation(orgUsername);
     this.onMutation?.();
   }
 
@@ -123,6 +138,7 @@ export class SchemaService {
     }
     const deleted = cache.delete(objectName.toLowerCase());
     if (deleted) {
+      this.notifyMutation(orgUsername);
       this.onMutation?.();
     }
     return deleted;
@@ -158,6 +174,72 @@ export class SchemaService {
    */
   public getAllOrgUsernames(): string[] {
     return Array.from(this.orgCaches.keys());
+  }
+
+  /**
+   * Load cached entries from disk, discarding TTL-expired entries.
+   * No-op if persistence is not configured.
+   */
+  public async loadFromDisk(): Promise<void> {
+    if (!this.persistence) {
+      return;
+    }
+
+    const allOrgs = await this.persistence.loadAll();
+    for (const [orgUsername, entries] of allOrgs) {
+      for (const [objectName, entry] of entries) {
+        // Use getOrCreateOrgCache + cache.set directly to avoid triggering
+        // persistence scheduleSave during load (would cause infinite loop)
+        const cache = this.getOrCreateOrgCache(orgUsername);
+        cache.set(objectName, entry);
+      }
+    }
+  }
+
+  /**
+   * Flush all pending disk writes immediately.
+   * No-op if persistence is not configured.
+   */
+  public async flushToDisk(): Promise<void> {
+    if (!this.persistence) {
+      return;
+    }
+    await this.persistence.flush();
+  }
+
+  /**
+   * Graceful shutdown: flush pending writes and clear all caches.
+   */
+  public async shutdown(): Promise<void> {
+    await this.flushToDisk();
+    this.clear();
+  }
+
+  /**
+   * Get all entries for an org as a plain Map (for disk serialization).
+   */
+  private getOrgEntries(orgUsername: string): Map<string, SchemaEntry> {
+    const cache = this.orgCaches.get(orgUsername);
+    if (!cache) {
+      return new Map();
+    }
+    const result = new Map<string, SchemaEntry>();
+    // LRU cache dump() returns [key, LRUCache.Entry] pairs
+    for (const [key, entry] of cache.dump()) {
+      if (entry.value !== undefined) {
+        result.set(key, entry.value);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Notify persistence layer of a mutation for the given org.
+   */
+  private notifyMutation(orgUsername: string): void {
+    if (this.persistence) {
+      this.persistence.scheduleSave(orgUsername, () => this.getOrgEntries(orgUsername));
+    }
   }
 
   /**
