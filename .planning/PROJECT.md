@@ -32,10 +32,10 @@ AI agents can safely and efficiently interact with Salesforce orgs through well-
 - Completed tool-categories.ts (v1.1 Phase 2)
 - Consolidated shared params to mcp-provider-api (v1.1 Phase 2)
 - Per-org cache isolation — Validated in Phase 10: Schema Cache Foundation (LRU per org, TTL, single-flight, disk persistence)
+- salesforce_describe_object tool — Validated in Phase 11: Schema Discovery Tool (curated fields, cache-first with _meta transparency, Zod structured output)
 
 ### Active
 
-- [ ] describe_object tool for schema discovery
 - [ ] Successful SOQL auto-caches object/field metadata
 - [ ] Failed SOQL auto-describes and fuzzy-matches field suggestions
 - [ ] Schema relationship graph with join/lookup suggestions
@@ -57,8 +57,9 @@ AI agents can safely and efficiently interact with Salesforce orgs through well-
 - v1.0 resolved org names at startup; v1.1 eliminated all process.chdir() and enabled parallel execution
 - v1.2 added tool annotations, error recovery, structured output, MCP Resources
 - v1.3 Phase 10 complete — SchemaService with per-org LRU caches, disk persistence, and single-flight coalescing
-- run_soql_query error message already references `salesforce_describe_object` (not yet implemented)
-- tool-categories.ts already registers `salesforce_describe_object` as a read tool (placeholder)
+- v1.3 Phase 11 complete — salesforce_describe_object tool with cache-first behavior, curated output, _meta transparency
+- run_soql_query error message references `salesforce_describe_object` (now implemented)
+- tool-categories.ts registers `salesforce_describe_object` as a read tool (now implemented)
 - Existing Cache utility class at `packages/mcp/src/utils/cache.ts`
 - `connection.describe()` available via @salesforce/core for schema discovery
 
@@ -94,4 +95,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-12 after Phase 10 completion (Schema Cache Foundation)*
+*Last updated: 2026-04-12 after Phase 11 completion (Schema Discovery Tool)*
