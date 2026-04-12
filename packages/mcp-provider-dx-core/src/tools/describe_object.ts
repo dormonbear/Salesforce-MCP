@@ -176,6 +176,11 @@ export class DescribeObjectMcpTool extends McpTool<InputArgsShape, OutputArgsSha
       const cached = this.schemaService.get(orgUsername, input.objectName);
       const isCacheHit = cached !== undefined && cached.type === SchemaEntryType.FullDescribe;
 
+      // Invalidate partial/non-full entries so describeAndCache fetches from API (ACCH-03)
+      if (cached && cached.type !== SchemaEntryType.FullDescribe) {
+        this.schemaService.invalidate(orgUsername, input.objectName);
+      }
+
       // describeAndCache handles cache-first + single-flight coalescing
       const entry = await this.schemaService.describeAndCache(
         orgUsername,

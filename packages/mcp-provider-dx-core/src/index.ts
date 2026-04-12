@@ -105,7 +105,7 @@ export class DxCoreMcpProvider extends McpProvider {
       new GetUsernameMcpTool(services),
       new ListAllOrgsMcpTool(services),
       new OrgOpenMcpTool(services),
-      new QueryOrgMcpTool(services),
+      new QueryOrgMcpTool(services, schemaService),
       new ResumeMcpTool(services),
       new RetrieveMetadataMcpTool(services),
       new TestAgentsMcpTool(services),

@@ -20,6 +20,9 @@ import { SfError } from '@salesforce/core';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { textResponse } from '../shared/utils.js';
 import { directoryParam, usernameOrAliasParam, useToolingApiParam } from '../shared/params.js';
+import { SchemaService } from '../schema/index.js';
+import { SchemaEntryType, type PartialFieldsEntry } from '../schema/types.js';
+import { parseSoqlFields } from '../schema/soql-parser.js';
 
 /*
  * Query Salesforce org
@@ -52,7 +55,10 @@ type InputArgsShape = typeof queryOrgParamsSchema.shape;
 type OutputArgsShape = typeof queryOutputSchema.shape;
 
 export class QueryOrgMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
-  public constructor(private readonly services: Services) {
+  public constructor(
+    private readonly services: Services,
+    private readonly schemaService: SchemaService,
+  ) {
     super();
   }
 
@@ -94,6 +100,35 @@ export class QueryOrgMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
       const result = input.useToolingApi
         ? await connection.tooling.query(input.query)
         : await connection.query(input.query);
+
+      // Auto-cache: extract object + fields from successful SOQL (ACCH-01)
+      // Fire-and-forget — never fail a successful query because of caching (D-08)
+      if (!input.useToolingApi) {
+        try {
+          const parsed = parseSoqlFields(input.query);
+          if (parsed) {
+            const orgUsername = connection.getUsername() ?? input.usernameOrAlias;
+            const existing = this.schemaService.get(orgUsername, parsed.objectName);
+
+            // Never downgrade a full describe to partial
+            if (!existing || existing.type === SchemaEntryType.PartialFields) {
+              let fieldNames = parsed.fieldNames;
+              if (existing?.type === SchemaEntryType.PartialFields) {
+                fieldNames = [...new Set([...existing.fieldNames, ...fieldNames])];
+              }
+
+              this.schemaService.set(orgUsername, parsed.objectName, {
+                type: SchemaEntryType.PartialFields,
+                objectName: parsed.objectName,
+                fieldNames,
+                cachedAt: Date.now(),
+              } satisfies PartialFieldsEntry);
+            }
+          }
+        } catch {
+          // Silently ignore — caching failure must never fail the query (D-08)
+        }
+      }
 
       const structured = { totalSize: result.totalSize, done: result.done, records: result.records };
       return {

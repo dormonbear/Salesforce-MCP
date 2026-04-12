@@ -22,12 +22,13 @@ import { GetOrgInfoMcpTool } from '../../src/tools/get_org_info.js';
 import { TestApexMcpTool } from '../../src/tools/run_apex_test.js';
 import { TestAgentsMcpTool } from '../../src/tools/run_agent_test.js';
 import { AssignPermissionSetMcpTool } from '../../src/tools/assign_permission_set.js';
+import { SchemaService } from '../../src/schema/schema-service.js';
 
 describe('structured output schemas', () => {
   const mockServices = {} as Services;
 
   describe('run_soql_query', () => {
-    const tool = new QueryOrgMcpTool(mockServices);
+    const tool = new QueryOrgMcpTool(mockServices, new SchemaService());
     const config = tool.getConfig();
     const schema = z.object(config.outputSchema!);
 
