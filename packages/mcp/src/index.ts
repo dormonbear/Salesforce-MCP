@@ -143,7 +143,7 @@ You can also use special values to control access to orgs:
     }
     const server = new SfMcpServer(
       {
-        name: 'dormon-sf-mcp',
+        name: 'sf-mcp-server-enhanced',
         version: this.config.version,
         capabilities: {
           resources: {},
@@ -192,7 +192,7 @@ You can also use special values to control access to orgs:
       setTimeout(() => process.exit(0), 5000);
     });
 
-    console.error(`✅ dormon-sf-mcp v${this.config.version} running on stdio`);
+    console.error(`✅ sf-mcp-server-enhanced v${this.config.version} running on stdio`);
   }
 
   protected async catch(error: Error): Promise<void> {
