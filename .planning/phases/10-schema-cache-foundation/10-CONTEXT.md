@@ -29,6 +29,12 @@ Deliver a per-org, TTL-aware, LRU-bounded schema cache as a reusable service int
 - **D-07:** Default TTL: 1 hour (3,600,000 ms). Override via `SF_SCHEMA_CACHE_TTL_MINUTES` env var.
 - **D-08:** LRU max entries per org: 100 objects (sufficient for most sessions; evicts least-recently-used objects first).
 
+### Disk Persistence
+- **D-12:** Cache persists to disk as JSON files — one file per org, stored in server dataDir (from `ConfigService.getDataDir()`).
+- **D-13:** On process startup, load existing JSON cache files. Discard entries whose TTL has expired at load time.
+- **D-14:** Write to disk on cache mutations (debounced — not every single write, batch with a short delay e.g. 5s) and on graceful shutdown (SIGTERM).
+- **D-15:** File path convention: `{dataDir}/schema-cache/{orgUsername}.json`. Directory auto-created if missing.
+
 ### Concurrency
 - **D-09:** Single-flight pattern for concurrent describe requests — if N parallel tool calls all need to describe the same object, only 1 API call fires. Others await the same Promise.
 - **D-10:** No Mutex needed for cache reads/writes — `lru-cache` is synchronous and JS is single-threaded. The single-flight pattern uses a `Map<string, Promise>` for in-flight requests.

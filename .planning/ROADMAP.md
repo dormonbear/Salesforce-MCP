@@ -176,15 +176,16 @@ Plans:
 ## Phase Details
 
 ### Phase 10: Schema Cache Foundation
-**Goal**: A per-org, TTL-aware, LRU-bounded schema cache exists as a service accessible to all tools, with concurrent describe requests coalesced into single API calls
+**Goal**: A per-org, TTL-aware, LRU-bounded schema cache exists as a service accessible to all tools, with concurrent describe requests coalesced into single API calls and disk persistence across restarts
 **Depends on**: Phase 9
-**Requirements**: SINF-01, SINF-02, SINF-03, SINF-04
+**Requirements**: SINF-01, SINF-02, SINF-03, SINF-04, SINF-05
 **Success Criteria** (what must be TRUE):
   1. Schema data for org A is never returned when querying org B — per-org isolation verified with two orgs sharing an alias
   2. A cached entry automatically becomes a cache miss after the configured TTL expires (default 1 hour, overridable via SF_SCHEMA_CACHE_TTL_MINUTES)
   3. The cache accepts and stores three distinct data types: full describe results, partial field lists, and relationship graph edges
   4. Ten concurrent describe requests for the same object on the same org result in exactly one API call (single-flight pattern verified by test)
   5. Cache size remains bounded — LRU eviction prevents unbounded memory growth regardless of how many objects are described
+  6. Cache persists to per-org JSON files in dataDir; on startup, loads existing cache and discards TTL-expired entries; survives process restart
 **Plans**: TBD
 
 ### Phase 11: Schema Discovery Tool

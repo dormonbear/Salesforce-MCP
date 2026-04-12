@@ -49,7 +49,7 @@ Progress: [░░░░░░░░░░] 0%
 - [v1.3 Roadmap]: Schema cache is separate from existing Cache class — different TTL semantics, per-org isolation
 - [v1.3 Roadmap]: Cache key is canonical username (not alias) — prevents cross-org schema bleed
 - [v1.3 Roadmap]: Levenshtein for fuzzy match (no vector deps) — fuse.js optional for ranked scoring
-- [v1.3 Roadmap]: No disk persistence in v1.3 — in-memory only with TTL; disk deferred to future
+- [v1.3 Roadmap]: Disk persistence via per-org JSON files in dataDir — load on startup, discard expired entries
 
 ### Pending Todos
 

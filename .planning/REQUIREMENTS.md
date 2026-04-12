@@ -41,6 +41,7 @@ Requirements for Smart Schema Cache milestone. Reduces AI SOQL query failures th
 - [ ] **SINF-02**: Cache entries expire after configurable TTL (default 1 hour, override via `SF_SCHEMA_CACHE_TTL_MINUTES`)
 - [ ] **SINF-03**: Cache stores three data types: full describe results, partial (success-path) field lists, and relationship graph edges
 - [ ] **SINF-04**: Concurrent describe requests for the same object coalesce into a single API call (single-flight pattern)
+- [ ] **SINF-05**: Cache persists to disk as per-org JSON files; on startup, loads existing cache and discards TTL-expired entries
 
 ### Schema Discovery
 
@@ -79,7 +80,6 @@ Deferred to future milestones.
 
 ### Persistence & Training
 
-- **PERS-01**: Persist schema cache to disk with checksum-based invalidation (org API version as checksum)
 - **PERS-02**: Use query history as RAG training data for improved SOQL generation (semantic matching against stored queries)
 - **PERS-03**: `describeGlobal()` pre-warming at startup for frequently-used orgs
 
@@ -103,7 +103,7 @@ Deferred to future milestones.
 | Feature | Reason |
 |---------|--------|
 | Vector embedding fuzzy match | Over-engineering; Levenshtein covers 99% of typos without external deps |
-| Persistent disk cache (v1.3) | Stale data risk; in-memory with TTL is safer for first iteration |
+| Persistent disk cache (SQLite) | JSON files sufficient for schema cache; SQLite adds unnecessary complexity |
 | Auto-inject full schema into context | Token explosion (100+ fields per object); on-demand describe is sufficient |
 | describeGlobal at startup | 800+ objects per org; rate limit risk; low value without field details |
 | Cross-org shared cache | Orgs diverge (custom fields); mixing cache entries creates wrong suggestions |
@@ -129,6 +129,7 @@ Deferred to future milestones.
 | SINF-02 | Phase 10 | Pending |
 | SINF-03 | Phase 10 | Pending |
 | SINF-04 | Phase 10 | Pending |
+| SINF-05 | Phase 10 | Pending |
 | DISC-04 | Phase 11 | Pending |
 | DISC-05 | Phase 11 | Pending |
 | DISC-06 | Phase 11 | Pending |
@@ -147,8 +148,8 @@ Deferred to future milestones.
 | QHST-03 | Phase 15 | Pending |
 
 **Coverage:**
-- v1.3 requirements: 20 total
-- Mapped to phases: 20/20
+- v1.3 requirements: 21 total
+- Mapped to phases: 21/21
 - Unmapped: 0
 
 ---
