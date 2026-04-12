@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-import { expect } from 'chai';
-import sinon from 'sinon';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rm, readdir } from 'node:fs/promises';
+import { expect } from 'chai';
+import sinon from 'sinon';
 import { SchemaDiskPersistence } from '../../../src/schema/disk-persistence.js';
 import { SchemaEntryType, type SchemaEntry, type FullDescribeEntry } from '../../../src/schema/types.js';
 
@@ -63,7 +63,7 @@ describe('SchemaDiskPersistence', () => {
       await persistence.saveOrg('user@org.com', entries);
 
       const filePath = join(dataDir, 'schema-cache', 'user@org.com.json');
-      const content = JSON.parse(await readFile(filePath, 'utf-8'));
+      const content = JSON.parse(await readFile(filePath, 'utf-8')) as { entries: Record<string, unknown>; savedAt: number };
       expect(content).to.have.property('entries');
       expect(content).to.have.property('savedAt');
       expect(content.entries).to.have.property('account');

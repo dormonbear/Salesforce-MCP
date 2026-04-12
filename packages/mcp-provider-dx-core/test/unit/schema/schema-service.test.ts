@@ -357,12 +357,11 @@ describe('SchemaService', () => {
       );
 
       // All should reject with the same error
-      for (const promise of promises) {
-        try {
-          await promise;
-          expect.fail('Expected rejection');
-        } catch (err) {
-          expect(err).to.equal(error);
+      const results = await Promise.allSettled(promises);
+      for (const result of results) {
+        expect(result.status).to.equal('rejected');
+        if (result.status === 'rejected') {
+          expect(result.reason).to.equal(error);
         }
       }
 

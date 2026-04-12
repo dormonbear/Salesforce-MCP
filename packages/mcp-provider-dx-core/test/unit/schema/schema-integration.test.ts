@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-import { expect } from 'chai';
-import sinon from 'sinon';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { mkdir, rm, readdir } from 'node:fs/promises';
+import { expect } from 'chai';
+import sinon from 'sinon';
 import type { Services } from '@dormon/mcp-provider-api';
 import { SchemaService } from '../../../src/schema/schema-service.js';
 import { SchemaEntryType, type FullDescribeEntry, type PartialFieldsEntry } from '../../../src/schema/types.js';
@@ -86,7 +86,7 @@ describe('SchemaService + Persistence Integration', () => {
 
   describe('TTL-expired entries discarded on load', () => {
     it('discards expired entries and keeps fresh entries across restart', async () => {
-      const ttlMs = 3_600_000; // 1 hour
+      const ttlMs = 3600000; // 1 hour
 
       // Instance 1: set entries with mixed freshness
       const service1 = new SchemaService({ dataDir, ttlMs });
