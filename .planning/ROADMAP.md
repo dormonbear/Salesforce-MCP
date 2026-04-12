@@ -186,7 +186,11 @@ Plans:
   4. Ten concurrent describe requests for the same object on the same org result in exactly one API call (single-flight pattern verified by test)
   5. Cache size remains bounded — LRU eviction prevents unbounded memory growth regardless of how many objects are described
   6. Cache persists to per-org JSON files in dataDir; on startup, loads existing cache and discards TTL-expired entries; survives process restart
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 10-01-PLAN.md — Schema types + SchemaService with per-org LRU cache, TTL, single-flight coalescing
+- [ ] 10-02-PLAN.md — Disk persistence (save/load/debounce) + DxCoreMcpProvider wiring
 
 ### Phase 11: Schema Discovery Tool
 **Goal**: AI agents can explicitly inspect any Salesforce object's schema before writing queries, with results served from cache when available
@@ -256,7 +260,7 @@ Plans:
 | 7. Error Recovery | v1.2 | 2/2 | Complete | 2026-04-11 |
 | 8. Structured Output | v1.2 | 2/2 | Complete | 2026-04-11 |
 | 9. MCP Resources | v1.2 | 2/2 | Complete | 2026-04-11 |
-| 10. Schema Cache Foundation | v1.3 | 0/? | Not started | - |
+| 10. Schema Cache Foundation | v1.3 | 0/2 | Planning | - |
 | 11. Schema Discovery Tool | v1.3 | 0/? | Not started | - |
 | 12. Auto-Cache on Success | v1.3 | 0/? | Not started | - |
 | 13. Failure Recovery | v1.3 | 0/? | Not started | - |
