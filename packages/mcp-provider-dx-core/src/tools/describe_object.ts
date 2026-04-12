@@ -35,7 +35,8 @@ import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { textResponse } from '../shared/utils.js';
 import { usernameOrAliasParam } from '../shared/params.js';
 import { SchemaService } from '../schema/index.js';
-import { SchemaEntryType, type FullDescribeEntry, type SchemaEntry } from '../schema/types.js';
+import { SchemaEntryType, type FullDescribeEntry, type SchemaEntry, type RelationshipEdge } from '../schema/types.js';
+import { extractRelationshipEdges } from '../schema/relationship-edges.js';
 
 export const describeObjectParamsSchema = z.object({
   objectName: z.string().describe(
@@ -67,6 +68,12 @@ export const describeObjectOutputSchema = z.object({
     referenceTo: z.array(z.string()),
     relationshipName: z.string().nullable(),
   })),
+  relationships: z.array(z.object({
+    from: z.string(),
+    to: z.string(),
+    via: z.string(),
+    type: z.enum(['lookup', 'master-detail']),
+  })).optional().default([]),
   _meta: z.object({
     source: z.enum(['cache', 'api']),
     cachedAt: z.number(),
@@ -80,7 +87,7 @@ type InputArgsShape = typeof describeObjectParamsSchema.shape;
 type OutputArgsShape = typeof describeObjectOutputSchema.shape;
 type CuratedDescribeResult = z.infer<typeof describeObjectOutputSchema>;
 
-function curateDescribeResult(entry: SchemaEntry, isCacheHit: boolean): CuratedDescribeResult {
+function curateDescribeResult(entry: SchemaEntry, isCacheHit: boolean, relationships: RelationshipEdge[] = []): CuratedDescribeResult {
   const data = (entry as FullDescribeEntry).data;
   const fields = (data.fields as Array<Record<string, unknown>>) ?? [];
   const childRels = (data.childRelationships as Array<Record<string, unknown>>) ?? [];
@@ -114,6 +121,7 @@ function curateDescribeResult(entry: SchemaEntry, isCacheHit: boolean): CuratedD
       field: cr.field as string,
     })),
     lookupFields,
+    relationships,
     _meta: {
       source: isCacheHit ? 'cache' as const : 'api' as const,
       cachedAt: entry.cachedAt,
@@ -192,7 +200,21 @@ export class DescribeObjectMcpTool extends McpTool<InputArgsShape, OutputArgsSha
         } satisfies FullDescribeEntry),
       );
 
-      const curated = curateDescribeResult(entry, isCacheHit);
+      // Fire-and-forget: extract and cache relationship edges (RELG-01, RELG-02, D-05)
+      let relationships: RelationshipEdge[] = [];
+      try {
+        if (entry.type === SchemaEntryType.FullDescribe) {
+          const edges = extractRelationshipEdges(input.objectName, (entry as FullDescribeEntry).data);
+          relationships = edges;
+          if (edges.length > 0) {
+            this.schemaService.setRelationships(orgUsername, input.objectName, edges);
+          }
+        }
+      } catch {
+        // Silently ignore — edge extraction must never fail the describe (D-05)
+      }
+
+      const curated = curateDescribeResult(entry, isCacheHit, relationships);
 
       return {
         content: [{ type: 'text' as const, text: `Schema for ${curated.objectName} (${curated.fieldCount} fields):\n\n${JSON.stringify(curated, null, 2)}` }],

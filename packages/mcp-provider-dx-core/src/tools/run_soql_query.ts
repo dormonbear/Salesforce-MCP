@@ -21,9 +21,10 @@ import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { textResponse } from '../shared/utils.js';
 import { directoryParam, usernameOrAliasParam, useToolingApiParam } from '../shared/params.js';
 import { SchemaService } from '../schema/index.js';
-import { SchemaEntryType, type PartialFieldsEntry, type FullDescribeEntry } from '../schema/types.js';
+import { SchemaEntryType, type PartialFieldsEntry, type FullDescribeEntry, type RelationshipEdge } from '../schema/types.js';
 import { parseSoqlFields } from '../schema/soql-parser.js';
 import { findSimilarFields } from '../schema/levenshtein.js';
+import { extractRelationshipEdges } from '../schema/relationship-edges.js';
 
 /*
  * Query Salesforce org
@@ -142,9 +143,27 @@ export class QueryOrgMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
         }
       }
 
+      // Relationship suggestions — only on success, only with cached edges (D-07, D-08, D-09)
+      let relSection = '';
+      try {
+        const parsed = parseSoqlFields(input.query);
+        if (parsed) {
+          const orgUsername = connection.getUsername() ?? input.usernameOrAlias;
+          const edges = this.schemaService.getRelationships(orgUsername, parsed.objectName);
+          if (edges?.length) {
+            const hints = edges.slice(0, 5).map((e: RelationshipEdge) =>
+              `${e.from}.${e.via} -> ${e.to} (${e.type} via ${e.via})`
+            );
+            relSection = `\n\n_relationships:\n${hints.join('\n')}`;
+          }
+        }
+      } catch {
+        // Silent — suggestions must never fail a successful query
+      }
+
       const structured = { totalSize: result.totalSize, done: result.done, records: result.records };
       return {
-        content: [{ type: 'text' as const, text: `SOQL query results:\n\n${JSON.stringify(result, null, 2)}` }],
+        content: [{ type: 'text' as const, text: `SOQL query results:\n\n${JSON.stringify(result, null, 2)}${relSection}` }],
         structuredContent: structured,
       };
     } catch (error) {
@@ -184,6 +203,18 @@ export class QueryOrgMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
                 cachedAt: Date.now(),
               } satisfies FullDescribeEntry),
             );
+
+            // Fire-and-forget: extract edges from recovery describe (D-05, RELG-01)
+            try {
+              if (entry.type === SchemaEntryType.FullDescribe) {
+                const recoveryEdges = extractRelationshipEdges(objectName, (entry as FullDescribeEntry).data);
+                if (recoveryEdges.length > 0) {
+                  this.schemaService.setRelationships(orgUsername, objectName, recoveryEdges);
+                }
+              }
+            } catch {
+              // Silent — edge extraction must never fail the recovery path
+            }
 
             // Fuzzy match field suggestions (FAIL-02, FAIL-03)
             if (entry.type === SchemaEntryType.FullDescribe) {
