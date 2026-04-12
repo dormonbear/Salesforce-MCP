@@ -70,9 +70,9 @@ Requirements for Smart Schema Cache milestone. Reduces AI SOQL query failures th
 
 ### Query History
 
-- [ ] **QHST-01**: Store N most recent successful SOQL queries per org in a ring buffer (default N=50)
-- [ ] **QHST-02**: Query history retention limit is configurable (environment variable or server config)
-- [ ] **QHST-03**: Query history is accessible via a `list_query_history` tool or included in describe_object context
+- [x] **QHST-01**: Store N most recent successful SOQL queries per org in a ring buffer (default N=50)
+- [x] **QHST-02**: Query history retention limit is configurable (environment variable or server config)
+- [x] **QHST-03**: Query history is accessible via a `list_query_history` tool or included in describe_object context
 
 ## Future Requirements
 
@@ -143,9 +143,9 @@ Deferred to future milestones.
 | RELG-01 | Phase 14 | Validated |
 | RELG-02 | Phase 14 | Validated |
 | RELG-03 | Phase 14 | Validated |
-| QHST-01 | Phase 15 | Pending |
-| QHST-02 | Phase 15 | Pending |
-| QHST-03 | Phase 15 | Pending |
+| QHST-01 | Phase 15 | Validated |
+| QHST-02 | Phase 15 | Validated |
+| QHST-03 | Phase 15 | Validated |
 
 **Coverage:**
 - v1.3 requirements: 21 total

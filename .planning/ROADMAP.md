@@ -171,7 +171,7 @@ Plans:
 - [x] **Phase 12: Auto-Cache on Success** - Side-effect caching of object/field metadata from successful SOQL queries
 - [x] **Phase 13: Failure Recovery** - Auto-describe on INVALID_FIELD errors with fuzzy field suggestions
 - [x] **Phase 14: Relationship Graph** - Extract and surface join/lookup path suggestions from describe results
-- [ ] **Phase 15: Query History** - Ring buffer storage with list_query_history tool
+- [x] **Phase 15: Query History** - Ring buffer storage with list_query_history tool
 
 ## Phase Details
 
@@ -280,4 +280,4 @@ Plans:
 | 12. Auto-Cache on Success | v1.3 | 0/? | Not started | - |
 | 13. Failure Recovery | v1.3 | 0/? | Not started | - |
 | 14. Relationship Graph | v1.3 | 0/? | Not started | - |
-| 15. Query History | v1.3 | 0/? | Not started | - |
+| 15. Query History | v1.3 | 3/3 | Complete | 204 |
