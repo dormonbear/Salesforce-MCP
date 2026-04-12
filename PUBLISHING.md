@@ -12,7 +12,7 @@ This project publishes 3 npm packages in the `@dormon` scope:
 
 **MCP Server Name**: `sf-mcp-server-enhanced`
 **CLI Binary**: `sf-mcp-server-enhanced`
-**Current Version**: `1.0.0` (all packages)
+**Current Version**: `0.0.1` (all packages)
 
 ## Prerequisites
 
