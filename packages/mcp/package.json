@@ -1,9 +1,10 @@
 {
   "name": "@dormon/salesforce-mcp",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "description": "Enhanced MCP Server for interacting with Salesforce instances",
   "bin": {
-    "sf-mcp-server-enhanced": "bin/run.js"
+    "sf-mcp-server-enhanced": "bin/run.js",
+    "salesforce-mcp": "bin/run.js"
   },
   "types": "lib/index.d.ts",
   "license": "Apache-2.0",

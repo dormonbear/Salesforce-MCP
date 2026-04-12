@@ -27,7 +27,7 @@ import { EnrichMetadataMcpProvider } from '@salesforce/mcp-provider-metadata-enr
 /** -------- ADD McpProvider INSTANCES HERE ------------------------------------------------------------------------- */
 
 export const MCP_PROVIDER_REGISTRY: McpProvider[] = [
-  new DxCoreMcpProvider(),
+  new DxCoreMcpProvider() as unknown as McpProvider,
   new CodeAnalyzerMcpProvider(),
   new LwcExpertsMcpProvider(),
   new AuraExpertsMcpProvider(),

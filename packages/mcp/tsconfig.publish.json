@@ -1,0 +1,11 @@
+{
+  "extends": "@salesforce/dev-config/tsconfig-strict",
+  "compilerOptions": {
+    "outDir": "./lib",
+    "rootDir": "./src",
+    "strictNullChecks": true,
+    "skipLibCheck": true,
+    "declaration": true
+  },
+  "include": ["./src"]
+}
