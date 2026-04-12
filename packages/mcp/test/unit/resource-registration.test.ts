@@ -1,6 +1,6 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
-import { McpProvider, McpResource, McpResourceTemplate } from '@salesforce/mcp-provider-api';
+import { McpProvider, McpResource, McpResourceTemplate } from '@dormon/mcp-provider-api';
 import { ResourceMetadata } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ReadResourceResult, ServerNotification, ServerRequest } from '@modelcontextprotocol/sdk/types.js';

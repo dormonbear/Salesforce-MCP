@@ -1,7 +1,16 @@
 {
-  "name": "@salesforce/mcp-provider-api",
-  "description": "(For Internal Use Only) API to implement a McpProvider that provides prompts, resources, and tools to be registered by an MCP server",
-  "version": "0.6.0",
+  "name": "@dormon/mcp-provider-api",
+  "description": "API to implement a McpProvider that provides prompts, resources, and tools to be registered by an MCP server",
+  "version": "1.0.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dormonbear/Salesforce-MCP.git",
+    "directory": "packages/mcp-provider-api"
+  },
+  "homepage": "https://github.com/dormonbear/Salesforce-MCP",
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "license": "Apache-2.0",
   "main": "dist/index.js",
@@ -37,6 +46,7 @@
     "lint": "echo 'no lint script available yet'",
     "postclean": "rimraf dist && rimraf ./*.tgz",
     "package": "yarn pack",
+    "prepublishOnly": "yarn build",
     "test": "tsc --build tsconfig.json --noEmit && vitest run --coverage"
   }
 }

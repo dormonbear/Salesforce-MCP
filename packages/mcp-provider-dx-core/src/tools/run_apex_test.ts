@@ -18,7 +18,7 @@ import { z } from 'zod';
 import { TestLevel, TestResult, TestRunIdResult, TestService } from '@salesforce/apex-node';
 import { ApexTestResultOutcome } from '@salesforce/apex-node/lib/src/tests/types.js';
 import { Duration, ensureArray } from '@salesforce/kit';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset, toolError, classifyError } from '@salesforce/mcp-provider-api';
+import { McpTool, McpToolConfig, ReleaseState, Services, Toolset, toolError, classifyError } from '@dormon/mcp-provider-api';
 import { SfError } from '@salesforce/core';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { directoryParam, usernameOrAliasParam } from '../shared/params.js';

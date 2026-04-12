@@ -1,31 +1,29 @@
-# mcp
+# @dormon/salesforce-mcp
 
-MCP Server for Interacting with Salesforce Orgs
+Enhanced MCP Server for Interacting with Salesforce Orgs
 
-[![NPM](https://img.shields.io/npm/v/@salesforce/mcp.svg?label=@salesforce/mcp)](https://www.npmjs.com/package/@salesforce/mcp) [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://opensource.org/license/apache-2-0)
+[![NPM](https://img.shields.io/npm/v/@dormon/salesforce-mcp.svg?label=@dormon/salesforce-mcp)](https://www.npmjs.com/package/@dormon/salesforce-mcp) [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://opensource.org/license/apache-2-0)
+
+> Fork of [@salesforce/mcp](https://github.com/salesforcecli/mcp) with improvements for concurrency safety, error recovery, structured output, and MCP Resources.
+
+## Improvements over upstream
+
+- **Concurrency Safety** — Eliminated `process.chdir()` race conditions; tools execute in parallel (except lwc-experts which uses targeted serialization)
+- **Startup Org Resolution** — Symbolic org names resolved once at startup, eliminating per-call config reads
+- **Error Recovery Guidance** — Top-10 GA tools return `[USER_ERROR]`/`[SYSTEM_ERROR]` with `[RECOVERY]` hints for LLM self-repair
+- **Structured Output** — 6 core tools return `structuredContent` + `outputSchema` for machine-readable results
+- **MCP Resources** — Org list and per-org permissions exposed as discoverable MCP Resources
+- **Complete Tool Annotations** — All GA tools declare `readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint`
+- **Multi-org Permissions** — Per-org read-only/full-access/approval-required permission model
+- **No Telemetry** — All Salesforce telemetry removed
 
 ## Feedback
 
-Report bugs and issues [here](https://github.com/forcedotcom/mcp/issues).  
-For feature requests and other related topics, start a Discussion [here](https://github.com/forcedotcom/mcp/discussions).
+Report bugs and issues [here](https://github.com/dormonbear/Salesforce-MCP/issues).
 
-## Documentation
+## Overview
 
-For general documentation about the Salesforce DX MCP Server, see [this section](https://developer.salesforce.com/docs/atlas.en-us.sfdx_dev.meta/sfdx_dev/sfdx_dev_mcp.htm) in the _Salesforce DX Developer Guide_. The docs include:
-
-- Comprehensive overview, including details about the security features.
-- Quick start guide.
-- Multiple examples of configuring the server in your MCP client.
-- Sample prompts for invoking the core DX MCP tools.
-
-[Here are the release notes.](https://github.com/forcedotcom/mcp/tree/main/releasenotes)
-
-## Overview of the Salesforce DX MCP Server (Beta)
-
-The Salesforce DX MCP Server is a specialized Model Context Protocol (MCP) implementation designed to facilitate seamless interaction between large language models (LLMs) and Salesforce orgs. This MCP server provides a robust set of tools and capabilities that enable LLMs to read, manage, and operate Salesforce resources securely.
-
-> [!NOTE]
-> _Salesforce DX MCP Server is a pilot or beta service that is subject to the Beta Services Terms at [Agreements - Salesforce.com](https://www.salesforce.com/company/legal/) or a written Unified Pilot Agreement if executed by Customer, and applicable terms in the [Product Terms Directory](https://ptd.salesforce.com/). Use of this pilot or beta service is at the Customer's sole discretion._
+This is an enhanced MCP server for Salesforce, built on top of the official Salesforce DX MCP Server. It provides 100+ tools across 9 providers for interacting with Salesforce orgs through AI agents.
 
 ## Configure the DX MCP Server
 
@@ -38,7 +36,7 @@ Here's an example for VS Code with Copilot in which you create and update a `.vs
   "servers": {
     "Salesforce DX": {
       "command": "npx",
-      "args": ["-y", "@salesforce/mcp",
+      "args": ["-y", "@dormon/salesforce-mcp",
               "--orgs", "DEFAULT_TARGET_ORG",
               "--toolsets", "orgs,metadata,data,users",
               "--tools", "run_apex_test",
@@ -52,7 +50,7 @@ The `args` format shown in the preceding example is the same for all MCP clients
 
 **Notes**:
 
-- The `"-y", "@salesforce/mcp"` part tells `npx` to automatically install the `@salesforce/mcp` package instead of asking permission. Don't change this.
+- The `"-y", "@dormon/salesforce-mcp"` part tells `npx` to automatically install the `@dormon/salesforce-mcp` package instead of asking permission. Don't change this.
 - For possible flags that you can pass to the `args` option, and the possible values that you can pass to the `--orgs`, `--toolsets`, and `--tools` flags, see these sections:
   - [Available Flags for the `args` Option](#available-flags-for-the-args-option)
   - [Configure Orgs](#configure-orgs)
@@ -74,7 +72,7 @@ To configure [Claude Code](https://www.claude.com/product/claude-code) to work w
   "mcpServers": {
     "Salesforce DX": {
       "command": "npx",
-      "args": ["-y", "@salesforce/mcp",
+      "args": ["-y", "@dormon/salesforce-mcp",
                "--orgs", "DEFAULT_TARGET_ORG",
                "--toolsets", "orgs,metadata,data,users",
                "--tools", "run_apex_test",
@@ -93,7 +91,7 @@ To configure [Cline](https://docs.cline.bot/mcp/mcp-overview) to work with Sales
   "mcpServers": {
     "Salesforce DX": {
       "command": "npx",
-      "args": ["-y", "@salesforce/mcp@latest",
+      "args": ["-y", "@dormon/salesforce-mcp@latest",
               "--orgs", "DEFAULT_TARGET_ORG",
               "--toolsets", "orgs,metadata,data,users",
               "--tools", "run_apex_test",
@@ -112,7 +110,7 @@ To configure [Cursor](https://cursor.com/docs/context/mcp) to work with Salesfor
   "mcpServers": {
     "Salesforce DX": {
       "command": "npx",
-      "args": ["-y", "@salesforce/mcp@latest",
+      "args": ["-y", "@dormon/salesforce-mcp@latest",
               "--orgs", "DEFAULT_TARGET_ORG",
               "--toolsets", "orgs,metadata,data,users",
               "--tools", "run_apex_test",
@@ -139,7 +137,6 @@ These are the flags that you can pass to the `args` option.
 | `--allow-non-ga-tools` | Boolean flag to allow the DX MCP Server to use both the generally available (GA) and NON-GA tools that are in the toolsets or tools you specify.                                      | No        | By default, the DX MCP server uses only the tools marked GA.                                                                                                                                                                               |
 | `--debug`              | Boolean flag that requests that the DX MCP Server print debug logs.                                                                                                                   | No        | Debug mode is disabled by default. <br/> <br/>**NOTE:** Not all MCP clients expose MCP logs, so this flag might not work for all IDEs.                                                                                                     |
 | `--dynamic-tools`      | (experimental) Boolean flag that enables dynamic tool discovery and loading. When specified, the DX MCP server starts with a minimal set of core tools and loads new tools as needed. | No        | This flag is useful for reducing the initial context size and improving LLM performance. Dynamic tool discovery is disabled by default.<br/> <br/>**NOTE:** This feature works in VSCode and Cline but may not work in other environments. |
-| `--no-telemetry`       | Boolean flag to disable telemetry, the automatic collection of data for monitoring and analysis.                                                                                      | No        | Telemetry is enabled by default, so specify this flag to disable it.                                                                                                                                                                       |
 | `--orgs`               | One or more orgs that you've locally authorized.                                                                                                                                      | Yes       | You must specify at least one org. <br/> <br/>See [Configure Orgs](#configure-orgs) for the values you can pass to this flag.                                                                                                              |
 | `--tools`              | Individual tool names that you want to enable.                                                                                                                                        | No        | You can use this flag in combination with the `--toolsets` flag. For example, you can enable all tools in one toolset, and just one tool in a different toolset.                                                                           |
 | `--toolsets`           | Sets of tools, based on functionality, that you want to enable.                                                                                                                       | No        | Set to "all" to enable every tool in every toolset. <br/> <br/>See [Configure Toolsets](#configure-toolsets) for the values you can pass to this flag.                                                                                     |

@@ -17,7 +17,7 @@
 import { z } from 'zod';
 import { AuthRemover, Org } from '@salesforce/core';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@dormon/mcp-provider-api';
 import { textResponse } from '../shared/utils.js';
 import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
 

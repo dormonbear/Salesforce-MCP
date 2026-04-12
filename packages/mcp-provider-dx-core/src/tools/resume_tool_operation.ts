@@ -19,7 +19,7 @@ import { AgentTester } from '@salesforce/agents';
 import { Connection, SfError, validateSalesforceId, scratchOrgResume, PollingClient, StatusResult } from '@salesforce/core';
 import { Duration } from '@salesforce/kit';
 import { MetadataApiDeploy } from '@salesforce/source-deploy-retrieve';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset, toolError, classifyError } from '@salesforce/mcp-provider-api';
+import { McpTool, McpToolConfig, ReleaseState, Services, Toolset, toolError, classifyError } from '@dormon/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { ensureString } from '@salesforce/ts-types';
 import { textResponse } from '../shared/utils.js';

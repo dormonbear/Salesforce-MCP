@@ -30,7 +30,7 @@
  * limitations under the License.
  */
 
-import { McpProvider, McpResource, McpResourceTemplate, McpTool, Services } from '@salesforce/mcp-provider-api';
+import { McpProvider, McpResource, McpResourceTemplate, McpTool, Services } from '@dormon/mcp-provider-api';
 import { OrgListResource } from './resources/org-list-resource.js';
 import { OrgPermissionsResource } from './resources/org-permissions-resource.js';
 import { AssignPermissionSetMcpTool } from './tools/assign_permission_set.js';
@@ -55,7 +55,7 @@ export {
   sanitizePath,
   optionalUsernameOrAliasParam,
   useToolingApiParam,
-} from '@salesforce/mcp-provider-api';
+} from '@dormon/mcp-provider-api';
 
 export class DxCoreMcpProvider extends McpProvider {
   public getName(): string {

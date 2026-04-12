@@ -20,7 +20,7 @@ import { z } from 'zod';
 import { Org, scratchOrgCreate, ScratchOrgCreateOptions } from '@salesforce/core';
 import { Duration } from '@salesforce/kit';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@dormon/mcp-provider-api';
 import { ensureString } from '@salesforce/ts-types/lib/narrowing/ensure.js';
 import { textResponse } from '../shared/utils.js';
 import { directoryParam, usernameOrAliasParam } from '../shared/params.js';

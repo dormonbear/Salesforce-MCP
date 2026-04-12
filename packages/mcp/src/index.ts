@@ -16,7 +16,7 @@
 
 /* eslint-disable no-console */
 
-import { TOOLSETS } from '@salesforce/mcp-provider-api';
+import { TOOLSETS } from '@dormon/mcp-provider-api';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { Command, Flags, ux } from '@oclif/core';
 import Cache from './utils/cache.js';
@@ -28,24 +28,6 @@ import { MCP_PROVIDER_REGISTRY } from './registry.js';
 import { Services } from './services.js';
 import { parseOrgPermissions } from './utils/org-permissions.js';
 
-/**
- * Sanitizes an array of org usernames by replacing specific orgs with a placeholder.
- * Special values (DEFAULT_TARGET_ORG, DEFAULT_TARGET_DEV_HUB, ALLOW_ALL_ORGS) are preserved.
- *
- * @param {string[]} input - Array of org identifiers to sanitize
- * @returns {string} Comma-separated string of sanitized org identifiers
- */
-function sanitizeOrgInput(input: string[]): string {
-  return input
-    .map((org) => {
-      if (org === 'DEFAULT_TARGET_ORG' || org === 'DEFAULT_TARGET_DEV_HUB' || org === 'ALLOW_ALL_ORGS') {
-        return org;
-      }
-
-      return 'SANITIZED_ORG';
-    })
-    .join(', ');
-}
 
 export default class McpServerCommand extends Command {
   public static summary = 'Start the Salesforce MCP server';
@@ -104,9 +86,6 @@ You can also use special values to control access to orgs:
       exclusive: ['dynamic-tools'],
     }),
     version: Flags.version(),
-    'no-telemetry': Flags.boolean({
-      summary: 'Disable telemetry',
-    }),
     debug: Flags.boolean({
       summary: 'Enable debug logging',
     }),
@@ -148,20 +127,7 @@ You can also use special values to control access to orgs:
   public async run(): Promise<void> {
     const { flags } = await this.parse(McpServerCommand);
 
-    if (!flags['no-telemetry']) {
-      this.telemetry = new Telemetry(this.config, {
-        toolsets: (flags.toolsets ?? []).join(', '),
-        orgs: sanitizeOrgInput(flags.orgs),
-      });
-
-      await this.telemetry.start();
-
-      process.stdin.on('close', () => {
-        this.telemetry?.sendEvent('SERVER_STOPPED_SUCCESS');
-        this.telemetry?.stop();
-      });
-      
-    }
+    this.telemetry = new Telemetry();
 
     // Resolve symbolic org names (DEFAULT_TARGET_ORG, DEFAULT_TARGET_DEV_HUB) to actual
     // usernames at startup. This eliminates per-call config reads that depend on
@@ -222,8 +188,6 @@ You can also use special values to control access to orgs:
     // Handle SIGTERM for graceful shutdown
     // https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle#stdio
     process.on('SIGTERM', () => {
-      this.telemetry?.sendEvent('SERVER_STOPPED_SUCCESS');
-      this.telemetry?.stop();
       server.close();
       setTimeout(() => process.exit(0), 5000);
     });
@@ -232,17 +196,6 @@ You can also use special values to control access to orgs:
   }
 
   protected async catch(error: Error): Promise<void> {
-    if (!this.telemetry && !process.argv.includes('--no-telemetry')) {
-      this.telemetry = new Telemetry(this.config);
-      await this.telemetry.start();
-    }
-
-    // Track startup failures such as invalid flags, missing dependencies, or initialization errors
-    this.telemetry?.sendEvent('START_ERROR', {
-      error: error.message,
-      stack: error.stack,
-    });
-
     await super.catch(error);
   }
 }

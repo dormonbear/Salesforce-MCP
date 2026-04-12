@@ -1,10 +1,10 @@
-import { McpResourceTemplate } from '@salesforce/mcp-provider-api';
+import { McpResourceTemplate } from '@dormon/mcp-provider-api';
 import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ResourceMetadata } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import type { ReadResourceResult, ServerNotification, ServerRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { Variables } from '@modelcontextprotocol/sdk/shared/uriTemplate.js';
-import type { Services } from '@salesforce/mcp-provider-api';
+import type { Services } from '@dormon/mcp-provider-api';
 
 export class OrgPermissionsResource extends McpResourceTemplate {
   private readonly services: Services;

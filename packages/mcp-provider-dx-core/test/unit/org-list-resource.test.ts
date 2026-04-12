@@ -1,6 +1,6 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
-import type { Services } from '@salesforce/mcp-provider-api';
+import type { Services } from '@dormon/mcp-provider-api';
 import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import type { ServerNotification, ServerRequest } from '@modelcontextprotocol/sdk/types.js';
 import { OrgListResource } from '../../src/resources/org-list-resource.js';

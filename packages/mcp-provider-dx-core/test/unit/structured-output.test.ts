@@ -15,7 +15,7 @@
  */
 import { expect } from 'chai';
 import { z } from 'zod';
-import { Services } from '@salesforce/mcp-provider-api';
+import { Services } from '@dormon/mcp-provider-api';
 import { QueryOrgMcpTool } from '../../src/tools/run_soql_query.js';
 import { ListAllOrgsMcpTool } from '../../src/tools/list_all_orgs.js';
 import { GetOrgInfoMcpTool } from '../../src/tools/get_org_info.js';

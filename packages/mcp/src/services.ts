@@ -24,7 +24,7 @@ import {
   PermissionService,
   OrgPermission,
   ToolCategory,
-} from '@salesforce/mcp-provider-api';
+} from '@dormon/mcp-provider-api';
 import Cache from './utils/cache.js';
 import {
   getConnection,

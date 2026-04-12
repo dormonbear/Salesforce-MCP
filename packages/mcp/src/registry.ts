@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-import { McpProvider } from '@salesforce/mcp-provider-api';
-import { DxCoreMcpProvider } from '@salesforce/mcp-provider-dx-core';
+import { McpProvider } from '@dormon/mcp-provider-api';
+import { DxCoreMcpProvider } from '@dormon/mcp-provider-dx-core';
 import { CodeAnalyzerMcpProvider } from '@salesforce/mcp-provider-code-analyzer';
 import { LwcExpertsMcpProvider } from '@salesforce/mcp-provider-lwc-experts';
 import { AuraExpertsMcpProvider } from '@salesforce/mcp-provider-aura-experts';

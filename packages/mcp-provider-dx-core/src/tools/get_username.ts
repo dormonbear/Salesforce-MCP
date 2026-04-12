@@ -15,9 +15,9 @@
  */
 
 import { z } from 'zod';
-import { McpTool, McpToolConfig, OrgConfigInfo, ReleaseState, Services, Toolset, toolError, classifyError } from '@salesforce/mcp-provider-api';
+import { McpTool, McpToolConfig, OrgConfigInfo, ReleaseState, Services, Toolset, toolError, classifyError } from '@dormon/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { type OrgService } from '@salesforce/mcp-provider-api';
+import { type OrgService } from '@dormon/mcp-provider-api';
 import { textResponse } from '../shared/utils.js';
 import { directoryParam } from '../shared/params.js';
 import { type ToolTextResponse } from '../shared/types.js';

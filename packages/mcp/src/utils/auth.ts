@@ -15,7 +15,7 @@
  */
 
 import { AuthInfo, Connection, ConfigAggregator, OrgConfigProperties, StateAggregator, type OrgAuthorization } from '@salesforce/core';
-import { type OrgConfigInfo, type SanitizedOrgAuthorization } from '@salesforce/mcp-provider-api';
+import { type OrgConfigInfo, type SanitizedOrgAuthorization } from '@dormon/mcp-provider-api';
 import Cache from './cache.js';
 
 /**

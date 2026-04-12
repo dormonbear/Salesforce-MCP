@@ -15,7 +15,7 @@
  */
 
 import { z } from 'zod';
-import { McpTool, McpToolConfig, ReleaseState, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, McpToolConfig, ReleaseState, Toolset } from '@dormon/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { enableTools as utilEnableTools } from '../utils/tools.js';
 import { SfMcpServer } from '../sf-mcp-server.js';

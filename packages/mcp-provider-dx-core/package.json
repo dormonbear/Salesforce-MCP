@@ -1,7 +1,7 @@
 {
-  "name": "@salesforce/mcp-provider-dx-core",
-  "version": "0.9.5",
-  "description": "MCP provider for core Salesforce DX functionality",
+  "name": "@dormon/mcp-provider-dx-core",
+  "version": "1.0.0",
+  "description": "Enhanced MCP provider for core Salesforce DX functionality",
   "types": "lib/index.d.ts",
   "license": "Apache-2.0",
   "type": "module",
@@ -14,13 +14,18 @@
     "lint": "wireit",
     "test": "wireit",
     "test:e2e": "nyc mocha \"./test/e2e/**/*.test.ts\" --slow 4500 --timeout 600000 --parallel --jobs 20",
-    "test:only": "wireit"
+    "test:only": "wireit",
+    "prepublishOnly": "yarn build"
   },
-  "repository": "salesforcecli/mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dormonbear/Salesforce-MCP.git",
+    "directory": "packages/mcp-provider-dx-core"
+  },
   "bugs": {
-    "url": "https://github.com/salesforcecli/mcp/issues"
+    "url": "https://github.com/dormonbear/Salesforce-MCP/issues"
   },
-  "homepage": "https://github.com/salesforcecli/mcp",
+  "homepage": "https://github.com/dormonbear/Salesforce-MCP",
   "exports": {
     ".": {
       "import": "./lib/index.js",
@@ -40,7 +45,7 @@
     "@salesforce/apex-node": "^8.2.1",
     "@salesforce/core": "^8.24.3",
     "@salesforce/kit": "^3.1.6",
-    "@salesforce/mcp-provider-api": "0.6.0",
+    "@dormon/mcp-provider-api": "1.0.0",
     "@salesforce/source-deploy-retrieve": "^12.31.8",
     "@salesforce/source-tracking": "^7.8.2",
     "@salesforce/ts-types": "^2.0.11",

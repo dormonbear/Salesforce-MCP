@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { McpTool } from '@salesforce/mcp-provider-api';
+import { McpTool } from '@dormon/mcp-provider-api';
 import { SfMcpServer } from './sf-mcp-server.js';
 import { EnableToolsMcpTool } from './tools/enable_tools.js';
 import { ListToolsMcpTool } from './tools/list_tools.js';

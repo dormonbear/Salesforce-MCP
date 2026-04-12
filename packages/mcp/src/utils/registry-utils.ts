@@ -24,7 +24,7 @@ import {
   Toolset,
   TOOLSETS,
   Versioned,
-} from '@salesforce/mcp-provider-api';
+} from '@dormon/mcp-provider-api';
 import { SfMcpServer } from '../sf-mcp-server.js';
 import { MCP_PROVIDER_REGISTRY } from '../registry.js';
 import { addTool, isToolRegistered } from '../utils/tools.js';

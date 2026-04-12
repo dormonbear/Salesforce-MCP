@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { McpTool, McpToolConfig, ReleaseState, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, McpToolConfig, ReleaseState, Toolset } from '@dormon/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { listAllTools } from '../utils/tools.js';
 
