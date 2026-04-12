@@ -18,7 +18,7 @@ import { expect } from 'chai';
 import sinon from 'sinon';
 import { z } from 'zod';
 import { ReleaseState, type Services, Toolset } from '@dormon/mcp-provider-api';
-import { DescribeObjectMcpTool, describeObjectOutputSchema } from '../../../src/tools/describe_object.js';
+import { DescribeObjectMcpTool } from '../../../src/tools/describe_object.js';
 import { SchemaService } from '../../../src/schema/schema-service.js';
 import { SchemaEntryType, type FullDescribeEntry, type PartialFieldsEntry } from '../../../src/schema/types.js';
 
