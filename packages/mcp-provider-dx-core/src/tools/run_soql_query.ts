@@ -21,8 +21,9 @@ import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { textResponse } from '../shared/utils.js';
 import { directoryParam, usernameOrAliasParam, useToolingApiParam } from '../shared/params.js';
 import { SchemaService } from '../schema/index.js';
-import { SchemaEntryType, type PartialFieldsEntry } from '../schema/types.js';
+import { SchemaEntryType, type PartialFieldsEntry, type FullDescribeEntry } from '../schema/types.js';
 import { parseSoqlFields } from '../schema/soql-parser.js';
+import { findSimilarFields } from '../schema/levenshtein.js';
 
 /*
  * Query Salesforce org
@@ -90,13 +91,24 @@ export class QueryOrgMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
   }
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
+    if (!input.usernameOrAlias)
+      return textResponse(
+        'The usernameOrAlias parameter is required, if the user did not specify one use the #get_username tool',
+        true,
+      );
+
+    let connection: Awaited<ReturnType<ReturnType<Services['getOrgService']>['getConnection']>>;
     try {
-      if (!input.usernameOrAlias)
-        return textResponse(
-          'The usernameOrAlias parameter is required, if the user did not specify one use the #get_username tool',
-          true,
-        );
-      const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
+      connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
+    } catch (error) {
+      const sfErr = SfError.wrap(error);
+      return toolError(`Failed to connect to org: ${sfErr.message}`, {
+        recovery: 'Verify the org alias or username is correct and authenticated.',
+        category: classifyError(sfErr),
+      });
+    }
+
+    try {
       const result = input.useToolingApi
         ? await connection.tooling.query(input.query)
         : await connection.query(input.query);
@@ -146,6 +158,46 @@ export class QueryOrgMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
           recovery: hint,
           category: 'user',
         });
+      }
+
+      // INVALID_FIELD recovery — auto-describe + fuzzy match suggestions (FAIL-01..04)
+      if (sfErr.name === 'INVALID_FIELD' || /No such column '\w+' on entity '\w+'/i.test(sfErr.message)) {
+        const fieldMatch = sfErr.message.match(/No such column '(\w+)' on entity '(\w+)'/i);
+        if (fieldMatch) {
+          const [, invalidField, objectName] = fieldMatch;
+          try {
+            const orgUsername = connection.getUsername() ?? input.usernameOrAlias;
+
+            // Invalidate partial entry so describeAndCache does a full describe
+            const cached = this.schemaService.get(orgUsername, objectName);
+            if (cached && cached.type !== SchemaEntryType.FullDescribe) {
+              this.schemaService.invalidate(orgUsername, objectName);
+            }
+
+            // Auto-describe — single-flight coalesced + cached (FAIL-01, FAIL-04)
+            const entry = await this.schemaService.describeAndCache(
+              orgUsername,
+              objectName,
+              async () => ({
+                type: SchemaEntryType.FullDescribe,
+                data: (await connection.describe(objectName)) as unknown as Record<string, unknown>,
+                cachedAt: Date.now(),
+              } satisfies FullDescribeEntry),
+            );
+
+            // Fuzzy match field suggestions (FAIL-02, FAIL-03)
+            if (entry.type === SchemaEntryType.FullDescribe) {
+              const allFields = (entry.data.fields as Array<{ name: string }>).map(f => f.name);
+              const suggestions = findSimilarFields(invalidField, allFields, 3);
+              const recovery = suggestions.length > 0
+                ? `Did you mean: ${suggestions.join(', ')}?`
+                : 'Use salesforce_describe_object to verify available fields on the target object.';
+              return toolError(`Failed to query org: ${sfErr.message}`, { recovery, category: 'user' });
+            }
+          } catch {
+            // Describe failed — fall through to generic error (D-05)
+          }
+        }
       }
 
       const recovery = sfErr.actions?.join(' ')
