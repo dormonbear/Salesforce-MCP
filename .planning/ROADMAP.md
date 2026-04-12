@@ -213,7 +213,10 @@ Plans:
   1. After a successful SOQL query, the queried object name and field names appear in the schema cache as a partial entry — no extra network call is made
   2. The SOQL parser correctly extracts the FROM object and SELECT fields from flat queries, and gracefully skips complex queries (subqueries, GROUP BY, TYPEOF) without error
   3. When a partial cache entry exists and a full describe is later performed, the full describe result takes precedence on conflict while preserving any extra partial-only data
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 12-01-PLAN.md — TDD: SOQL parser, auto-cache hook in QueryOrgMcpTool, describe_object partial entry fix
 
 ### Phase 13: Failure Recovery
 **Goal**: When a SOQL query fails with an invalid field error, the system automatically describes the object and returns fuzzy-matched field suggestions alongside the error
