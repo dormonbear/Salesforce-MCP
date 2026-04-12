@@ -31,6 +31,7 @@ AI agents can safely and efficiently interact with Salesforce orgs through well-
 - Fixed SIGTERM handler bug (v1.1 Phase 2)
 - Completed tool-categories.ts (v1.1 Phase 2)
 - Consolidated shared params to mcp-provider-api (v1.1 Phase 2)
+- Per-org cache isolation — Validated in Phase 10: Schema Cache Foundation (LRU per org, TTL, single-flight, disk persistence)
 
 ### Active
 
@@ -38,7 +39,6 @@ AI agents can safely and efficiently interact with Salesforce orgs through well-
 - [ ] Successful SOQL auto-caches object/field metadata
 - [ ] Failed SOQL auto-describes and fuzzy-matches field suggestions
 - [ ] Schema relationship graph with join/lookup suggestions
-- [ ] Per-org cache isolation
 - [ ] Configurable query history retention
 
 ### Out of Scope
@@ -56,6 +56,7 @@ AI agents can safely and efficiently interact with Salesforce orgs through well-
 - Salesforce core: `@salesforce/core` ^8.24.3
 - v1.0 resolved org names at startup; v1.1 eliminated all process.chdir() and enabled parallel execution
 - v1.2 added tool annotations, error recovery, structured output, MCP Resources
+- v1.3 Phase 10 complete — SchemaService with per-org LRU caches, disk persistence, and single-flight coalescing
 - run_soql_query error message already references `salesforce_describe_object` (not yet implemented)
 - tool-categories.ts already registers `salesforce_describe_object` as a read tool (placeholder)
 - Existing Cache utility class at `packages/mcp/src/utils/cache.ts`
@@ -93,4 +94,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-12 after milestone v1.3 initialization*
+*Last updated: 2026-04-12 after Phase 10 completion (Schema Cache Foundation)*
