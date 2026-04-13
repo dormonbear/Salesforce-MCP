@@ -65,13 +65,13 @@ jobs:
           cd packages/mcp && npx tsc -p tsconfig.publish.json && cd ../..
 
       - name: Publish @dormon/mcp-provider-api
-        run: cd packages/mcp-provider-api && npm publish --access public || echo "Already published, skipping"
+        run: cd packages/mcp-provider-api && npm publish --access public --ignore-scripts || echo "Already published, skipping"
 
       - name: Publish @dormon/mcp-provider-dx-core
-        run: cd packages/mcp-provider-dx-core && npm publish --access public || echo "Already published, skipping"
+        run: cd packages/mcp-provider-dx-core && npm publish --access public --ignore-scripts || echo "Already published, skipping"
 
       - name: Publish @dormon/salesforce-mcp
-        run: cd packages/mcp && npm publish --access public || echo "Already published, skipping"
+        run: cd packages/mcp && npm publish --access public --ignore-scripts || echo "Already published, skipping"
 
       - name: Commit version bump back to main
         run: |
