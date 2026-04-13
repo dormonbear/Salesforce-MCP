@@ -1,16 +1,9 @@
 name: Publish @dormon packages
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version to publish (e.g., 0.0.5). Leave empty to use current package.json versions."
-        type: string
-        default: ""
-      dry-run:
-        description: "Dry run (skip actual npm publish)"
-        type: boolean
-        default: false
+  push:
+    tags:
+      - "v*"
 
 jobs:
   publish:
@@ -20,6 +13,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing version: $VERSION"
+
       - uses: actions/setup-node@v4
         with:
           node-version: "lts/*"
@@ -28,11 +28,9 @@ jobs:
       - name: Configure npm auth
         run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
 
-      - name: Bump versions (if specified)
-        if: inputs.version != ''
+      - name: Bump versions
         run: |
-          VERSION="${{ inputs.version }}"
-          echo "Bumping all packages to version $VERSION"
+          VERSION="${{ steps.version.outputs.version }}"
 
           for pkg in mcp-provider-api mcp-provider-dx-core mcp; do
             cd packages/$pkg
@@ -63,83 +61,56 @@ jobs:
 
       - name: Build all packages
         run: |
-          # Build mcp-provider-api
           cd packages/mcp-provider-api && npx tsc -p tsconfig.publish.json && cd ../..
-
-          # Build mcp-provider-dx-core
           cd packages/mcp-provider-dx-core && npx tsc -p tsconfig.publish.json && cd ../..
-
-          # Build mcp (salesforce-mcp)
           cd packages/mcp && npx tsc -p tsconfig.publish.json && cd ../..
 
       - name: Publish @dormon/mcp-provider-api
-        run: |
-          cd packages/mcp-provider-api
-          if [ "${{ inputs.dry-run }}" = "true" ]; then
-            echo "DRY RUN: npm publish --access public"
-            npm pack --dry-run
-          else
-            npm publish --access public
-          fi
+        run: cd packages/mcp-provider-api && npm publish --access public
 
       - name: Publish @dormon/mcp-provider-dx-core
-        run: |
-          cd packages/mcp-provider-dx-core
-          if [ "${{ inputs.dry-run }}" = "true" ]; then
-            echo "DRY RUN: npm publish --access public"
-            npm pack --dry-run
-          else
-            npm publish --access public
-          fi
+        run: cd packages/mcp-provider-dx-core && npm publish --access public
 
       - name: Publish @dormon/salesforce-mcp
-        run: |
-          cd packages/mcp
-          if [ "${{ inputs.dry-run }}" = "true" ]; then
-            echo "DRY RUN: npm publish --access public"
-            npm pack --dry-run
-          else
-            npm publish --access public
-          fi
+        run: cd packages/mcp && npm publish --access public
 
-      - name: Commit version bump
-        if: inputs.version != '' && inputs.dry-run != true
+      - name: Commit version bump back to main
         run: |
-          VERSION="${{ inputs.version }}"
+          VERSION="${{ steps.version.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add packages/*/package.json
           git commit -m "chore: bump all @dormon packages to v${VERSION}" || echo "No changes to commit"
-          git tag "v${VERSION}"
-          git push
-          git push --tags
+          git push origin HEAD:main
 
       - name: Verify published packages
-        if: inputs.dry-run != true
         run: |
+          VERSION="${{ steps.version.outputs.version }}"
           echo "Waiting for npm registry to update..."
           sleep 10
-          VERSION="${{ inputs.version }}"
-          if [ -z "$VERSION" ]; then
-            VERSION=$(node -p "require('./packages/mcp/package.json').version")
-          fi
-          echo "Verifying @dormon/salesforce-mcp@${VERSION}..."
-          npm view "@dormon/salesforce-mcp@${VERSION}" version || echo "⚠️ Package not yet visible on npm (may take a few minutes)"
+          npm view "@dormon/salesforce-mcp@${VERSION}" version || echo "⚠️ Not yet visible (may take a few minutes)"
+
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@2c591bcc8ecdcd2db72b97d6147f871fcd833ba5
+        with:
+          tag: "v${{ steps.version.outputs.version }}"
+          name: "v${{ steps.version.outputs.version }}"
+          body: |
+            ## @dormon/salesforce-mcp v${{ steps.version.outputs.version }}
+
+            ```bash
+            npx @dormon/salesforce-mcp@${{ steps.version.outputs.version }} --help
+            ```
+          token: ${{ secrets.GITHUB_TOKEN }}
+          skipIfReleaseExists: true
 
       - name: Summary
         run: |
-          VERSION="${{ inputs.version }}"
-          if [ -z "$VERSION" ]; then
-            VERSION=$(node -p "require('./packages/mcp/package.json').version")
-          fi
-          echo "## Published Packages" >> $GITHUB_STEP_SUMMARY
+          VERSION="${{ steps.version.outputs.version }}"
+          echo "## Published Packages v${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Package | Version |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|---------|" >> $GITHUB_STEP_SUMMARY
           echo "| @dormon/mcp-provider-api | ${VERSION} |" >> $GITHUB_STEP_SUMMARY
           echo "| @dormon/mcp-provider-dx-core | ${VERSION} |" >> $GITHUB_STEP_SUMMARY
           echo "| @dormon/salesforce-mcp | ${VERSION} |" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ inputs.dry-run }}" = "true" ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "⚠️ **This was a dry run. No packages were actually published.**" >> $GITHUB_STEP_SUMMARY
-          fi
