@@ -61,20 +61,14 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile || yarn install
 
-      - name: Build mcp-provider-api
+      - name: Build all packages
         run: |
-          cd packages/mcp-provider-api
-          npx tsc -p tsconfig.publish.json
-
-      - name: Build mcp-provider-dx-core
-        run: |
-          cd packages/mcp-provider-dx-core
-          npx tsc -p tsconfig.publish.json
-
-      - name: Build mcp (salesforce-mcp)
-        run: |
-          cd packages/mcp
-          npx tsc -p tsconfig.publish.json
+          # Build monorepo first (resolves all @salesforce/* type deps)
+          yarn build
+          # Rebuild @dormon packages with publish configs (standalone, no composite)
+          cd packages/mcp-provider-api && npx tsc -p tsconfig.publish.json && cd ../..
+          cd packages/mcp-provider-dx-core && npx tsc -p tsconfig.publish.json && cd ../..
+          cd packages/mcp && npx tsc -p tsconfig.publish.json && cd ../..
 
       - name: Publish @dormon/mcp-provider-api
         run: |
