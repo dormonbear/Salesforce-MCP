@@ -55,6 +55,10 @@ Progress: [██████████] 100%
 - [v1.3 Phase 12]: Partial+partial union merge at call site; full overwrites partial entirely via set()
 - [v1.3 Phase 15]: In-memory ring buffer for query history — no disk persistence needed
 
+### Roadmap Evolution
+
+- Phase 16 added: Branch Rename & GitHub Actions CI/CD
+
 ### Pending Todos
 
 None.

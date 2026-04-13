@@ -281,3 +281,13 @@ Plans:
 | 13. Failure Recovery | v1.3 | 0/? | Not started | - |
 | 14. Relationship Graph | v1.3 | 0/? | Not started | - |
 | 15. Query History | v1.3 | 3/3 | Complete | 204 |
+
+### Phase 16: Branch Rename & GitHub Actions CI/CD
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 15
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 16 to break down)
