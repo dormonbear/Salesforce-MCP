@@ -63,9 +63,8 @@ jobs:
 
       - name: Build all packages
         run: |
-          # Build monorepo first (resolves all @salesforce/* type deps)
-          yarn build
-          # Rebuild @dormon packages with publish configs (standalone, no composite)
+          # Build each @dormon package with standalone publish tsconfig
+          # (avoids wireit/composite project ref issues)
           cd packages/mcp-provider-api && npx tsc -p tsconfig.publish.json && cd ../..
           cd packages/mcp-provider-dx-core && npx tsc -p tsconfig.publish.json && cd ../..
           cd packages/mcp && npx tsc -p tsconfig.publish.json && cd ../..
