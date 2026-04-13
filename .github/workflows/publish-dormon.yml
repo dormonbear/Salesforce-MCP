@@ -28,6 +28,9 @@ jobs:
       - name: Configure npm auth
         run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
 
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile || yarn install
+
       - name: Bump versions
         run: |
           VERSION="${{ steps.version.outputs.version }}"
@@ -55,9 +58,6 @@ jobs:
             require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
           cd ../..
-
-      - name: Install dependencies
-        run: yarn install --frozen-lockfile || yarn install
 
       - name: Build all packages
         run: |
