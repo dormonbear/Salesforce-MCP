@@ -9,8 +9,7 @@
     "strict": true,
     "strictNullChecks": true,
     "skipLibCheck": true,
-    "declaration": true,
-    "isolatedModules": true
+    "declaration": true
   },
   "include": ["./src"]
 }
