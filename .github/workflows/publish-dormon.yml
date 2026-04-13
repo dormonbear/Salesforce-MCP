@@ -1,0 +1,149 @@
+name: Publish @dormon packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g., 0.0.5). Leave empty to use current package.json versions."
+        type: string
+        default: ""
+      dry-run:
+        description: "Dry run (skip actual npm publish)"
+        type: boolean
+        default: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: yarn
+
+      - name: Configure npm auth
+        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+
+      - name: Bump versions (if specified)
+        if: inputs.version != ''
+        run: |
+          VERSION="${{ inputs.version }}"
+          echo "Bumping all packages to version $VERSION"
+
+          for pkg in mcp-provider-api mcp-provider-dx-core mcp; do
+            cd packages/$pkg
+            npm version "$VERSION" --no-git-tag-version
+            cd ../..
+          done
+
+          # Update internal dependency versions
+          cd packages/mcp-provider-dx-core
+          node -e "
+            const pkg = require('./package.json');
+            pkg.dependencies['@dormon/mcp-provider-api'] = '$VERSION';
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          cd ../..
+
+          cd packages/mcp
+          node -e "
+            const pkg = require('./package.json');
+            pkg.dependencies['@dormon/mcp-provider-api'] = '$VERSION';
+            pkg.dependencies['@dormon/mcp-provider-dx-core'] = '$VERSION';
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          cd ../..
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile || yarn install
+
+      - name: Build mcp-provider-api
+        run: |
+          cd packages/mcp-provider-api
+          npx tsc -p tsconfig.json
+
+      - name: Build mcp-provider-dx-core
+        run: |
+          cd packages/mcp-provider-dx-core
+          npx tsc -p tsconfig.publish.json
+
+      - name: Build mcp (salesforce-mcp)
+        run: |
+          cd packages/mcp
+          npx tsc -p tsconfig.publish.json
+
+      - name: Publish @dormon/mcp-provider-api
+        run: |
+          cd packages/mcp-provider-api
+          if [ "${{ inputs.dry-run }}" = "true" ]; then
+            echo "DRY RUN: npm publish --access public"
+            npm pack --dry-run
+          else
+            npm publish --access public
+          fi
+
+      - name: Publish @dormon/mcp-provider-dx-core
+        run: |
+          cd packages/mcp-provider-dx-core
+          if [ "${{ inputs.dry-run }}" = "true" ]; then
+            echo "DRY RUN: npm publish --access public"
+            npm pack --dry-run
+          else
+            npm publish --access public
+          fi
+
+      - name: Publish @dormon/salesforce-mcp
+        run: |
+          cd packages/mcp
+          if [ "${{ inputs.dry-run }}" = "true" ]; then
+            echo "DRY RUN: npm publish --access public"
+            npm pack --dry-run
+          else
+            npm publish --access public
+          fi
+
+      - name: Commit version bump
+        if: inputs.version != '' && inputs.dry-run != true
+        run: |
+          VERSION="${{ inputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add packages/*/package.json
+          git commit -m "chore: bump all @dormon packages to v${VERSION}" || echo "No changes to commit"
+          git tag "v${VERSION}"
+          git push
+          git push --tags
+
+      - name: Verify published packages
+        if: inputs.dry-run != true
+        run: |
+          echo "Waiting for npm registry to update..."
+          sleep 10
+          VERSION="${{ inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION=$(node -p "require('./packages/mcp/package.json').version")
+          fi
+          echo "Verifying @dormon/salesforce-mcp@${VERSION}..."
+          npm view "@dormon/salesforce-mcp@${VERSION}" version || echo "⚠️ Package not yet visible on npm (may take a few minutes)"
+
+      - name: Summary
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION=$(node -p "require('./packages/mcp/package.json').version")
+          fi
+          echo "## Published Packages" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | Version |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| @dormon/mcp-provider-api | ${VERSION} |" >> $GITHUB_STEP_SUMMARY
+          echo "| @dormon/mcp-provider-dx-core | ${VERSION} |" >> $GITHUB_STEP_SUMMARY
+          echo "| @dormon/salesforce-mcp | ${VERSION} |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.dry-run }}" = "true" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **This was a dry run. No packages were actually published.**" >> $GITHUB_STEP_SUMMARY
+          fi
