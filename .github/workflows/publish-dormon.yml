@@ -35,29 +35,28 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
+          # Bump version in all package.json files
           for pkg in mcp-provider-api mcp-provider-dx-core mcp; do
-            cd packages/$pkg
-            npm version "$VERSION" --no-git-tag-version
-            cd ../..
+            node -e "
+              const pkg = require('./packages/$pkg/package.json');
+              pkg.version = '$VERSION';
+              require('fs').writeFileSync('./packages/$pkg/package.json', JSON.stringify(pkg, null, 2) + '\n');
+            "
           done
 
           # Update internal dependency versions
-          cd packages/mcp-provider-dx-core
           node -e "
-            const pkg = require('./package.json');
+            const pkg = require('./packages/mcp-provider-dx-core/package.json');
             pkg.dependencies['@dormon/mcp-provider-api'] = '$VERSION';
-            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            require('fs').writeFileSync('./packages/mcp-provider-dx-core/package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
-          cd ../..
 
-          cd packages/mcp
           node -e "
-            const pkg = require('./package.json');
+            const pkg = require('./packages/mcp/package.json');
             pkg.dependencies['@dormon/mcp-provider-api'] = '$VERSION';
             pkg.dependencies['@dormon/mcp-provider-dx-core'] = '$VERSION';
-            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            require('fs').writeFileSync('./packages/mcp/package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
-          cd ../..
 
       - name: Build all packages
         run: |
