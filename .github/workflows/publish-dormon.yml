@@ -63,22 +63,14 @@ jobs:
 
       - name: Build all packages
         run: |
-          # Debug: check if @salesforce provider packages are installed
-          echo "=== Checking node_modules ==="
-          ls packages/mcp/node_modules/@salesforce/ 2>/dev/null | head -20 || echo "No @salesforce in packages/mcp/node_modules"
-          ls node_modules/@salesforce/ 2>/dev/null | head -20 || echo "No @salesforce in root node_modules"
-
           # Build mcp-provider-api
           cd packages/mcp-provider-api && npx tsc -p tsconfig.publish.json && cd ../..
-          echo "✅ mcp-provider-api built"
 
           # Build mcp-provider-dx-core
           cd packages/mcp-provider-dx-core && npx tsc -p tsconfig.publish.json && cd ../..
-          echo "✅ mcp-provider-dx-core built"
 
-          # Build mcp with explicit typeRoots
+          # Build mcp (salesforce-mcp)
           cd packages/mcp && npx tsc -p tsconfig.publish.json && cd ../..
-          echo "✅ mcp built"
 
       - name: Publish @dormon/mcp-provider-api
         run: |
