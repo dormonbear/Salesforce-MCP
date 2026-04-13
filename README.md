@@ -4,7 +4,7 @@ Enhanced MCP Server for Interacting with Salesforce Orgs
 
 [![NPM](https://img.shields.io/npm/v/@dormon/salesforce-mcp.svg?label=@dormon/salesforce-mcp)](https://www.npmjs.com/package/@dormon/salesforce-mcp) [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://opensource.org/license/apache-2-0)
 
-> Fork of [@salesforce/mcp](https://github.com/salesforcecli/mcp) with improvements for concurrency safety, error recovery, structured output, and MCP Resources.
+> Fork of [@salesforce/mcp](https://github.com/salesforcecli/mcp) with improvements for concurrency safety, error recovery, structured output, schema intelligence, and MCP Resources.
 
 ## Improvements over upstream
 
@@ -15,6 +15,11 @@ Enhanced MCP Server for Interacting with Salesforce Orgs
 - **MCP Resources** — Org list and per-org permissions exposed as discoverable MCP Resources
 - **Complete Tool Annotations** — All GA tools declare `readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint`
 - **Multi-org Permissions** — Per-org read-only/full-access/approval-required permission model
+- **Smart Schema Cache** — Per-org LRU schema cache with disk persistence, auto-populated from successful SOQL queries
+- **INVALID_FIELD Recovery** — Automatic fuzzy field name suggestions (Levenshtein distance) when SOQL queries reference invalid fields
+- **Relationship Graph** — Automatically extracts object relationships from `describe` results, surfaces related objects in SOQL query responses
+- **Query History** — Ring buffer stores recent successful SOQL queries per org; AI agents can list and reuse past queries via `salesforce_list_query_history`
+- **Describe Object Tool** — New `salesforce_describe_object` tool returns full object schema with fields, relationships, and child relationships
 - **No Telemetry** — All Salesforce telemetry removed
 
 ## Feedback
@@ -218,6 +223,7 @@ For complete documentation, see [Use MCP Tools to Analyze Your Code ](https://de
 
 For sample prompts that invoke the core DX MCP tools, see [Use the Core Salesforce DX MCP Tools](https://developer.salesforce.com/docs/atlas.en-us.sfdx_dev.meta/sfdx_dev/sfdx_dev_mcp_use_core_tools.htm) in the _Salesforce DX Developer Guide_.
 
+- `salesforce_get_org_info` (GA) - Retrieves detailed information about a Salesforce org.
 - `get_username` (GA) - Determines the appropriate username or alias for Salesforce operations, handling both default orgs and Dev Hubs.
 - `resume_tool_operation` (GA) - Resumes a long-running operation that wasn't completed by another tool.
 
@@ -225,7 +231,9 @@ For sample prompts that invoke the core DX MCP tools, see [Use the Core Salesfor
 
 For sample prompts that invoke the core DX MCP tools, see [Use the Core Salesforce DX MCP Tools](https://developer.salesforce.com/docs/atlas.en-us.sfdx_dev.meta/sfdx_dev/sfdx_dev_mcp_use_core_tools.htm) in the _Salesforce DX Developer Guide_.
 
-- `run_soql_query` (GA) - Runs a SOQL query against a Salesforce org.
+- `run_soql_query` (GA) - Runs a SOQL query against a Salesforce org. Features auto-cache, INVALID_FIELD recovery with fuzzy suggestions, relationship hints, and query history recording.
+- `salesforce_describe_object` (GA) - Describes a Salesforce object's schema including fields, relationships, and child relationships. Results are cached per-org with disk persistence.
+- `salesforce_list_query_history` (GA) - Lists recent successful SOQL queries for an org. Supports filtering by object name and configurable limit. Useful for discovering query patterns and reusing past queries.
 
 ### DevOps Center Toolset
 
