@@ -64,7 +64,7 @@ jobs:
       - name: Build mcp-provider-api
         run: |
           cd packages/mcp-provider-api
-          npx tsc -p tsconfig.json
+          npx tsc -p tsconfig.publish.json
 
       - name: Build mcp-provider-dx-core
         run: |
