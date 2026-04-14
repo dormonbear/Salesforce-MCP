@@ -95,6 +95,7 @@ describe('run_soql_query', () => {
     if (result.content[0].type !== 'text') assert.fail();
 
     const responseText = result.content[0].text;
+    expect(responseText).to.contain('Connected to:');
     expect(responseText).to.contain('SOQL query results:');
 
     // Parse the query result JSON
@@ -139,6 +140,7 @@ describe('run_soql_query', () => {
     if (result.content[0].type !== 'text') assert.fail();
 
     const responseText = result.content[0].text;
+    expect(responseText).to.contain('Connected to:');
     expect(responseText).to.contain('SOQL query results:');
 
     // Parse the query result JSON

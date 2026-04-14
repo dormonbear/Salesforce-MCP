@@ -17,7 +17,7 @@
 import { z } from 'zod';
 import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { textResponse } from '../shared/utils.js';
+import { textResponse, connectionHeader } from '../shared/utils.js';
 import { directoryParam, usernameOrAliasParam, useToolingApiParam } from '../shared/params.js';
 
 /*
@@ -87,7 +87,7 @@ export class QueryOrgMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
         ? await connection.tooling.query(input.query)
         : await connection.query(input.query);
 
-      return textResponse(`SOQL query results:\n\n${JSON.stringify(result, null, 2)}`);
+      return textResponse(`${connectionHeader(connection)}\n\nSOQL query results:\n\n${JSON.stringify(result, null, 2)}`);
     } catch (error) {
       let errorMessage = error instanceof Error ? error.message : 'Unknown error';
 

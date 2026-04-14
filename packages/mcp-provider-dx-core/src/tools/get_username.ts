@@ -15,12 +15,22 @@
  */
 
 import { z } from 'zod';
-import { McpTool, McpToolConfig, OrgConfigInfo, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, McpToolConfig, OrgConfigInfo, ReleaseState, Services, Toolset, type SanitizedOrgAuthorization } from '@salesforce/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { type OrgService } from '@salesforce/mcp-provider-api';
 import { textResponse } from '../shared/utils.js';
 import { directoryParam } from '../shared/params.js';
 import { type ToolTextResponse } from '../shared/types.js';
+
+function formatAllowedOrgsList(orgs: SanitizedOrgAuthorization[]): string {
+  return orgs
+    .map((o) => {
+      const username = o.username ?? 'unknown';
+      const alias = o.aliases?.[0];
+      return alias ? `  - ${alias} (${username})` : `  - ${username}`;
+    })
+    .join('\n');
+}
 
 export async function suggestUsername(orgService: OrgService): Promise<{
   suggestedUsername: string | undefined;
@@ -42,11 +52,23 @@ export async function suggestUsername(orgService: OrgService): Promise<{
     suggestedUsername = allAllowedOrgs[0].username;
     aliasForReference = allAllowedOrgs[0].aliases?.[0];
     reasoning = 'it was the only org found in the MCP Servers allowlisted orgs';
-  } else if (defaultTargetOrg?.value) {
-    const foundOrg = orgService.findOrgByUsernameOrAlias(allAllowedOrgs, defaultTargetOrg.value);
-    suggestedUsername = foundOrg?.username;
-    aliasForReference = foundOrg?.aliases?.[0];
-    reasoning = `it is the default ${targetOrgLocation}target org`;
+  } else if (allAllowedOrgs.length > 1) {
+    // Multiple orgs are allowed. Using a global/local default config as the automatic
+    // selection is unsafe — the config default may point to a production org while the
+    // user intends to target a sandbox (or vice versa). Silently binding to the config
+    // default has caused queries to be routed to the wrong org.
+    // Instead, list all available orgs and ask the user to confirm which one to use.
+    const orgList = formatAllowedOrgsList(allAllowedOrgs);
+
+    // Surface the config default as a hint only, not as a binding selection.
+    const defaultHint = defaultTargetOrg?.value
+      ? ` The ${targetOrgLocation}default target-org is "${defaultTargetOrg.value}", but this may not match the intended org.`
+      : '';
+
+    suggestedUsername = undefined;
+    reasoning =
+      `Multiple orgs are available in the MCP server's allowlist.${defaultHint} ` +
+      `Ask the user which org they want to use. Available orgs:\n${orgList}`;
   } else if (defaultTargetDevHub?.value) {
     const foundOrg = orgService.findOrgByUsernameOrAlias(allAllowedOrgs, defaultTargetDevHub.value);
     suggestedUsername = foundOrg?.username;
@@ -151,8 +173,7 @@ UNLESS THE USER SPECIFIES OTHERWISE, use this username (.value) for the "usernam
 
       if (!suggestedUsername) {
         return textResponse(
-          "No suggested username found. Please specify a username or alias explicitly. Also check the MCP server's startup args for allowlisting orgs.",
-          true,
+          `Cannot automatically determine which org to use. ${reasoning}\n\nAsk the user to specify which org they want to use, then pass the chosen username or alias as the "usernameOrAlias" parameter.`,
         );
       }
 

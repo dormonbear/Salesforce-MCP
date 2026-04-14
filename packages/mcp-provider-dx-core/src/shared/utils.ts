@@ -17,7 +17,20 @@
 /* eslint-disable no-console */
 
 import path from 'node:path';
+import type { Connection } from '@salesforce/core';
 import { type ToolTextResponse } from './types.js';
+
+/**
+ * Returns a single-line header identifying the org a tool connected to.
+ * Prepend this to tool responses so callers can verify the target org.
+ *
+ * Example: "Connected to: user@example.com @ https://example.my.salesforce.com (orgId: 00Dxx)"
+ */
+export function connectionHeader(connection: Connection): string {
+  const username = connection.getUsername() ?? 'unknown';
+  const orgId = connection.getAuthInfoFields().orgId ?? 'unknown';
+  return `Connected to: ${username} @ ${connection.instanceUrl} (orgId: ${orgId})`;
+}
 
 // TODO: break into two helpers? One for errors and one for success?
 export function textResponse(text: string, isError: boolean = false): ToolTextResponse {

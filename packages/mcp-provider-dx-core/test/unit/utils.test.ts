@@ -16,7 +16,8 @@
 import { sep } from 'node:path';
 import { expect } from 'chai';
 import sinon from 'sinon';
-import { textResponse, sanitizePath } from '../../src/shared/utils.js';
+import type { Connection } from '@salesforce/core';
+import { textResponse, sanitizePath, connectionHeader } from '../../src/shared/utils.js';
 
 describe('utilities tests', () => {
   // Common test setup
@@ -68,6 +69,36 @@ describe('utilities tests', () => {
       expect(result.content[0].text).to.equal(longString);
       expect(result.content[0].text.length).to.equal(1000);
       expect(result.isError).to.be.false;
+    });
+  });
+
+  describe('connectionHeader', () => {
+    function makeConnection(username: string, instanceUrl: string, orgId: string): Connection {
+      return {
+        getUsername: () => username,
+        instanceUrl,
+        getAuthInfoFields: () => ({ orgId }),
+      } as unknown as Connection;
+    }
+
+    it('should include username, instanceUrl, and orgId', () => {
+      const conn = makeConnection('user@staging.example.com', 'https://staging.my.salesforce.com', '00Dp0000STAGING');
+      const header = connectionHeader(conn);
+      expect(header).to.equal(
+        'Connected to: user@staging.example.com @ https://staging.my.salesforce.com (orgId: 00Dp0000STAGING)',
+      );
+    });
+
+    it('should use "unknown" when orgId is undefined', () => {
+      const conn = makeConnection('user@live.example.com', 'https://live.my.salesforce.com', undefined as unknown as string);
+      const header = connectionHeader(conn);
+      expect(header).to.contain('orgId: unknown');
+    });
+
+    it('should distinguish two different orgs with same-looking data', () => {
+      const live = makeConnection('user@live.example.com', 'https://live.my.salesforce.com', '00D_LIVE');
+      const staging = makeConnection('user@staging.example.com', 'https://staging.my.salesforce.com', '00D_STAGING');
+      expect(connectionHeader(live)).to.not.equal(connectionHeader(staging));
     });
   });
 
