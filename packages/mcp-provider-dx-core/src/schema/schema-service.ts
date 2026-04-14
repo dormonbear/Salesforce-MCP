@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import LRUCache from 'lru-cache';
+import { LRUCache } from 'lru-cache';
 import { SchemaEntryType, type SchemaEntry, type RelationshipEdge, type RelationshipEdgesEntry } from './types.js';
 import { SchemaDiskPersistence } from './disk-persistence.js';
 
