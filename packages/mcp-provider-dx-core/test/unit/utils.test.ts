@@ -17,7 +17,7 @@ import { sep } from 'node:path';
 import { expect } from 'chai';
 import sinon from 'sinon';
 import type { Connection } from '@salesforce/core';
-import { textResponse, sanitizePath, connectionHeader } from '../../src/shared/utils.js';
+import { textResponse, sanitizePath, connectionHeader, requireUsernameOrAlias, formatAllowedOrgsError, MissingUsernameOrAliasError } from '../../src/shared/utils.js';
 
 describe('utilities tests', () => {
   // Common test setup
@@ -153,6 +153,69 @@ describe('utilities tests', () => {
     it('should handle mixed path separators', () => {
       expect(sanitizePath('/path\\subpath/file')).to.be.true;
       expect(sanitizePath('\\path/..\\file')).to.be.false;
+    });
+  });
+
+  describe('formatAllowedOrgsError', () => {
+    it('should format a message listing all allowed orgs', () => {
+      const msg = formatAllowedOrgsError(['A', 'B', 'C']);
+      expect(msg).to.equal(
+        'Missing or invalid usernameOrAlias. Allowed orgs for this server: A, B, C. Ask the user which org to target.',
+      );
+    });
+
+    it('should handle empty allowed orgs list', () => {
+      const msg = formatAllowedOrgsError([]);
+      expect(msg).to.include('No allowed orgs configured');
+    });
+  });
+
+  describe('MissingUsernameOrAliasError', () => {
+    it('should carry the allowedOrgs list', () => {
+      const err = new MissingUsernameOrAliasError(['A', 'B']);
+      expect(err).to.be.instanceOf(Error);
+      expect(err.allowedOrgs).to.deep.equal(['A', 'B']);
+    });
+  });
+
+  describe('requireUsernameOrAlias', () => {
+    it('requireUsernameOrAlias([], undefined) throws with "No allowed orgs configured"', () => {
+      expect(() => requireUsernameOrAlias([], undefined)).to.throw(MissingUsernameOrAliasError)
+        .with.property('message').that.includes('No allowed orgs configured');
+    });
+
+    it('requireUsernameOrAlias(["A","B"], undefined) throws listing A, B and ask instruction', () => {
+      let caught: unknown;
+      try {
+        requireUsernameOrAlias(['A', 'B'], undefined);
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).to.be.instanceOf(MissingUsernameOrAliasError);
+      const err = caught as MissingUsernameOrAliasError;
+      expect(err.message).to.include('A');
+      expect(err.message).to.include('B');
+      expect(err.message).to.include('Ask the user');
+    });
+
+    it('requireUsernameOrAlias(["A","B"], "C") throws noting C not in allowed list', () => {
+      let caught: unknown;
+      try {
+        requireUsernameOrAlias(['A', 'B'], 'C');
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).to.be.instanceOf(MissingUsernameOrAliasError);
+      const err = caught as MissingUsernameOrAliasError;
+      expect(err.message).to.satisfy(
+        (m: string) => m.includes('C') || m.includes('not in') || m.includes('not allowed'),
+        'Error message should mention the invalid alias C or explain it is not in the allowed list',
+      );
+    });
+
+    it('requireUsernameOrAlias(["A","B"], "A") returns "A"', () => {
+      const result = requireUsernameOrAlias(['A', 'B'], 'A');
+      expect(result).to.equal('A');
     });
   });
 });
