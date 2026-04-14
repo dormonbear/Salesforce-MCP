@@ -53,14 +53,13 @@ export async function suggestUsername(orgService: OrgService): Promise<{
     aliasForReference = allAllowedOrgs[0].aliases?.[0];
     reasoning = 'it was the only org found in the MCP Servers allowlisted orgs';
   } else if (allAllowedOrgs.length > 1) {
-    // Multiple orgs are allowed. Using a global/local default config as the automatic
-    // selection is unsafe — the config default may point to a production org while the
-    // user intends to target a sandbox (or vice versa). Silently binding to the config
-    // default has caused queries to be routed to the wrong org.
-    // Instead, list all available orgs and ask the user to confirm which one to use.
+    // Multiple orgs are allowed. The global ~/.sf/config.json target-org is intentionally
+    // NOT used as an automatic selection signal: it caused the wrong-org routing bug
+    // (see .planning/debug/run-soql-query-wrong-org.md). The only valid selection is an
+    // explicit usernameOrAlias from the caller. List all allowed orgs and ask the user.
     const orgList = formatAllowedOrgsList(allAllowedOrgs);
 
-    // Surface the config default as a hint only, not as a binding selection.
+    // Surface the config default as an informational hint only — never as a binding selection.
     const defaultHint = defaultTargetOrg?.value
       ? ` The ${targetOrgLocation}default target-org is "${defaultTargetOrg.value}", but this may not match the intended org.`
       : '';
