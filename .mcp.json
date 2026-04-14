@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "salesforce-dx": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "-p",
+        "@dormon/salesforce-mcp",
+        "dormon-salesforce-mcp",
+        "--orgs",
+        "ALLOW_ALL_ORGS",
+        "--toolsets",
+        "all",
+        "--allow-non-ga-tools"
+      ],
+      "env": {}
+    }
+  }
+}

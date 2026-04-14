@@ -20,7 +20,7 @@ import { SourceTracking } from '@salesforce/source-tracking';
 import { ComponentSet, ComponentSetBuilder } from '@salesforce/source-deploy-retrieve';
 import { ensureString } from '@salesforce/ts-types';
 import { Duration } from '@salesforce/kit';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, type McpToolConfig, ReleaseState, type Services, Toolset, toolError, classifyError } from '@dormon/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
 import { textResponse, connectionHeader, requireUsernameOrAlias } from '../shared/utils.js';
@@ -120,8 +120,10 @@ Deploy X to my org and run A,B and C apex tests.`,
       inputSchema: deployMetadataParams.shape,
       outputSchema: undefined,
       annotations: {
+        readOnlyHint: false,
         destructiveHint: true,
-        openWorldHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
       },
       
     };
@@ -136,19 +138,14 @@ Deploy X to my org and run A,B and C apex tests.`,
       return textResponse("You can't specify both `sourceDir` and `manifest` parameters.", true);
     }
 
-    const orgService = this.services.getOrgService();
-    const allowedOrgs = (await orgService.getAllowedOrgs()).flatMap((o) => [
-      ...(o.aliases ?? []),
-      ...(o.username ? [o.username] : []),
-    ]);
-    let usernameOrAlias: string;
+    const allowedOrgs = (await this.services.getOrgService().getAllowedOrgs()).flatMap((o) => [o.username, ...(o.aliases ?? [])].filter(Boolean) as string[]);
     try {
-      usernameOrAlias = requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
+      requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
     } catch (e) {
-      return textResponse(e instanceof Error ? e.message : String(e), true);
+      return textResponse((e as Error).message, true);
     }
 
-    const connection = await orgService.getConnection(usernameOrAlias);
+    const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
     const project = await SfProject.resolve(input.directory);
 
     const org = await Org.create({ connection });
@@ -196,15 +193,21 @@ Deploy X to my org and run A,B and C apex tests.`,
       return textResponse(`${connectionHeader(connection)}\n\nDeploy result: ${JSON.stringify(result.response)}`, !result.response.success);
     } catch (error) {
       const err = SfError.wrap(error);
+
       if (err.message.includes('timed out')) {
-        return textResponse(
-          `
-YOU MUST inform the user that the deploy timed out and if they want to resume the deploy, they can use the #resume_tool_operation tool
-and ${jobId} for the jobId parameter.`,
-          true,
-        );
+        return toolError('Deploy timed out before completion.', {
+          recovery: `Use resume_tool_operation with jobId "${jobId}" to check deploy status and wait for completion.`,
+          category: 'system',
+        });
       }
-      return textResponse(`Failed to deploy metadata: ${err.message}`, true);
+
+      const recovery = err.actions?.join(' ')
+        ?? 'Verify source files exist and contain valid metadata. If access denied, check org permissions with assign_permission_set.';
+
+      return toolError(`Failed to deploy metadata: ${err.message}`, {
+        recovery,
+        category: classifyError(err),
+      });
     }
   }
 }

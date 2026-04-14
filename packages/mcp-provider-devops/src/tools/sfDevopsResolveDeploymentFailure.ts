@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { z } from "zod";
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { McpTool, McpToolConfig, ReleaseState, Toolset, Services } from "@salesforce/mcp-provider-api";
-import { usernameOrAliasParam } from "../shared/params.js";
+import { usernameOrAliasParam } from "@salesforce/mcp-provider-api";
 import { normalizeAndValidateRepoPath, isSalesforceOrDevOpsProject } from "../shared/pathUtils.js";
 import { validateGitBranchName } from "../shared/gitUtils.js";
 import { canFullPromotionFixFailure } from "../resolveDeploymentFailure.js";

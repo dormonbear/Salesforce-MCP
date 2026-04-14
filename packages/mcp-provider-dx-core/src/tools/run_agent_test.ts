@@ -17,7 +17,8 @@
 import { z } from 'zod';
 import { AgentTester } from '@salesforce/agents';
 import { Duration } from '@salesforce/kit';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, type McpToolConfig, ReleaseState, type Services, Toolset, toolError, classifyError } from '@dormon/mcp-provider-api';
+import { SfError } from '@salesforce/core';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { usernameOrAliasParam } from '../shared/params.js';
 import { textResponse, connectionHeader, requireUsernameOrAlias } from '../shared/utils.js';
@@ -42,16 +43,24 @@ const runAgentTestsParam = z.object({
 `,
   ),
   usernameOrAlias: usernameOrAliasParam,
-  directory: z.string().optional().describe('OPTIONAL — not required for running Agent tests. AgentTester uses the org connection, not a local project.'),
+  directory: z.string().optional().describe('Salesforce DX project directory (optional for this tool)'),
   async: z
     .boolean()
     .default(false)
     .describe('Whether to wait for the tests to finish (false) or quickly return only the test id (true)'),
 });
 
+const agentTestOutputSchema = z.object({
+  runId: z.string().optional(),
+  status: z.string().optional(),
+  startTime: z.string().optional(),
+  endTime: z.string().optional(),
+  testCases: z.array(z.record(z.unknown())).optional(),
+});
+
 type InputArgs = z.infer<typeof runAgentTestsParam>;
 type InputArgsShape = typeof runAgentTestsParam.shape;
-type OutputArgsShape = z.ZodRawShape;
+type OutputArgsShape = typeof agentTestOutputSchema.shape;
 
 export class TestAgentsMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
   public constructor(private readonly services: Services) {
@@ -86,41 +95,52 @@ Run tests for the X agent
 Run this test
 start myAgentTest and don't wait for results`,
       inputSchema: runAgentTestsParam.shape,
-      outputSchema: undefined,
+      outputSchema: agentTestOutputSchema.shape,
       annotations: {
-        openWorldHint: false,
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
       },
     };
   }
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
-    const orgService = this.services.getOrgService();
-    const allowedOrgs = (await orgService.getAllowedOrgs()).flatMap((o) => [
-      ...(o.aliases ?? []),
-      ...(o.username ? [o.username] : []),
-    ]);
-    let usernameOrAlias: string;
+    const allowedOrgs = (await this.services.getOrgService().getAllowedOrgs()).flatMap((o) => [o.username, ...(o.aliases ?? [])].filter(Boolean) as string[]);
     try {
-      usernameOrAlias = requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
+      requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
     } catch (e) {
-      return textResponse(e instanceof Error ? e.message : String(e), true);
+      return textResponse((e as Error).message, true);
     }
 
-    const connection = await orgService.getConnection(usernameOrAlias);
+    const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
 
     try {
       const agentTester = new AgentTester(connection);
 
       if (input.async) {
         const startResult = await agentTester.start(input.agentApiName);
-        return textResponse(`${connectionHeader(connection)}\n\nTest Run: ${JSON.stringify(startResult)}`);
+        return {
+          content: [{ type: 'text' as const, text: `${connectionHeader(connection)}\n\nTest Run: ${JSON.stringify(startResult)}` }],
+          structuredContent: startResult as Record<string, unknown>,
+        };
       } else {
         const test = await agentTester.start(input.agentApiName);
         const result = await agentTester.poll(test.runId, { timeout: Duration.minutes(10) });
-        return textResponse(`${connectionHeader(connection)}\n\nTest result: ${JSON.stringify(result)}`);
+        return {
+          content: [{ type: 'text' as const, text: `${connectionHeader(connection)}\n\nTest result: ${JSON.stringify(result)}` }],
+          structuredContent: result as Record<string, unknown>,
+        };
       }
     } catch (e) {
-      return textResponse(`Failed to run Agent Tests: ${e instanceof Error ? e.message : 'Unknown error'}`, true);
+      const err = SfError.wrap(e);
+      const recovery = err.actions?.join(' ')
+        ?? 'Verify the agentApiName matches an aiEvaluationDefinition in the org. List files matching **/aiEvaluationDefinitions/*.aiEvaluationDefinition-meta.xml to check.';
+
+      return toolError(`Failed to run agent tests: ${err.message}`, {
+        recovery,
+        category: classifyError(err),
+      });
     }
   }
 }

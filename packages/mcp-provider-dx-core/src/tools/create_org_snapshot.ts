@@ -16,7 +16,7 @@
 
 import { z } from 'zod';
 import { Org } from '@salesforce/core';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, type McpToolConfig, ReleaseState, type Services, Toolset } from '@dormon/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { textResponse, connectionHeader, requireUsernameOrAlias } from '../shared/utils.js';
 import { usernameOrAliasParam } from '../shared/params.js';
@@ -35,7 +35,7 @@ import { usernameOrAliasParam } from '../shared/params.js';
  */
 
 const createOrgSnapshotParams = z.object({
-  directory: z.string().optional().describe('OPTIONAL — not required for creating org snapshots. Pure org API.'),
+  directory: z.string().optional().describe('Salesforce DX project directory (optional for this tool)'),
   devHub: usernameOrAliasParam.describe(
     'The default devhub username, use the #get_username tool to get the default devhub if unsure',
   ),
@@ -85,26 +85,19 @@ create a snapshot of my MyScratch in myDevHub`,
   }
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
+    const allowedOrgs = (await this.services.getOrgService().getAllowedOrgs()).flatMap((o) => [o.username, ...(o.aliases ?? [])].filter(Boolean) as string[]);
     try {
-      const orgService = this.services.getOrgService();
-      const allowedOrgs = (await orgService.getAllowedOrgs()).flatMap((o) => [
-        ...(o.aliases ?? []),
-        ...(o.username ? [o.username] : []),
-      ]);
-      // Validate both devHub and sourceOrg against the allowed list
-      let sourceOrg: string;
-      let devHub: string;
-      try {
-        sourceOrg = requireUsernameOrAlias(allowedOrgs, input.sourceOrg);
-        devHub = requireUsernameOrAlias(allowedOrgs, input.devHub);
-      } catch (e) {
-        return textResponse(e instanceof Error ? e.message : String(e), true);
-      }
+      requireUsernameOrAlias(allowedOrgs, input.sourceOrg);
+      requireUsernameOrAlias(allowedOrgs, input.devHub);
+    } catch (e) {
+      return textResponse((e as Error).message, true);
+    }
 
-      const connection = await orgService.getConnection(sourceOrg);
+    try {
+      const connection = await this.services.getOrgService().getConnection(input.sourceOrg);
 
       const sourceOrgId = (await Org.create({ connection })).getOrgId();
-      const devHubConnection = await orgService.getConnection(devHub);
+      const devHubConnection = await this.services.getOrgService().getConnection(input.devHub);
       const createResponse = await devHubConnection.sobject('OrgSnapshot').create({
         SourceOrg: sourceOrgId,
         Description: input.description,

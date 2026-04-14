@@ -15,12 +15,12 @@
  */
 
 import { z } from 'zod';
-import { Connection, Org, SfProject } from '@salesforce/core';
+import { Connection, Org, SfError, SfProject } from '@salesforce/core';
 import { SourceTracking } from '@salesforce/source-tracking';
 import { ComponentSet, ComponentSetBuilder } from '@salesforce/source-deploy-retrieve';
 import { ensureString } from '@salesforce/ts-types';
 import { Duration } from '@salesforce/kit';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, type McpToolConfig, ReleaseState, type Services, Toolset, toolError, classifyError } from '@dormon/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
 import { textResponse, connectionHeader, requireUsernameOrAlias } from '../shared/utils.js';
@@ -96,8 +96,10 @@ Retrieve X metadata from my org and ignore any conflicts between the local proje
       inputSchema: retrieveMetadataParams.shape,
       outputSchema: undefined,
       annotations: {
-        openWorldHint: false,
+        readOnlyHint: true,
         destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
       },
     };
   }
@@ -107,19 +109,14 @@ Retrieve X metadata from my org and ignore any conflicts between the local proje
       return textResponse("You can't specify both `sourceDir` and `manifest` parameters.", true);
     }
 
-    const orgService = this.services.getOrgService();
-    const allowedOrgs = (await orgService.getAllowedOrgs()).flatMap((o) => [
-      ...(o.aliases ?? []),
-      ...(o.username ? [o.username] : []),
-    ]);
-    let usernameOrAlias: string;
+    const allowedOrgs = (await this.services.getOrgService().getAllowedOrgs()).flatMap((o) => [o.username, ...(o.aliases ?? [])].filter(Boolean) as string[]);
     try {
-      usernameOrAlias = requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
+      requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
     } catch (e) {
-      return textResponse(e instanceof Error ? e.message : String(e), true);
+      return textResponse((e as Error).message, true);
     }
 
-    const connection = await orgService.getConnection(usernameOrAlias);
+    const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
     const project = await SfProject.resolve(input.directory);
 
     const org = await Org.create({ connection });
@@ -166,10 +163,22 @@ Retrieve X metadata from my org and ignore any conflicts between the local proje
       return textResponse(`${connectionHeader(connection)}\n\nRetrieve result: ${JSON.stringify(retrieveResult)}`, !retrieveResult.success);
       // }
     } catch (error) {
-      return textResponse(
-        `Failed to retrieve metadata: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        true,
-      );
+      const err = SfError.wrap(error);
+
+      if (err.message.includes('timed out')) {
+        return toolError('Retrieve timed out before completion.', {
+          recovery: 'Retry with a smaller component set, or check org connectivity.',
+          category: 'system',
+        });
+      }
+
+      const recovery = err.actions?.join(' ')
+        ?? 'Verify the metadata exists in the org. Check sourceDir paths or manifest contents.';
+
+      return toolError(`Failed to retrieve metadata: ${err.message}`, {
+        recovery,
+        category: classifyError(err),
+      });
     }
   }
 }

@@ -15,21 +15,12 @@
  */
 
 import { z } from 'zod';
-import { McpTool, McpToolConfig, OrgConfigInfo, ReleaseState, Services, Toolset, type SanitizedOrgAuthorization } from '@salesforce/mcp-provider-api';
+import { McpTool, type McpToolConfig, type OrgConfigInfo, ReleaseState, type Services, Toolset, toolError, classifyError } from '@dormon/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { type OrgService } from '@salesforce/mcp-provider-api';
+import { type OrgService } from '@dormon/mcp-provider-api';
 import { textResponse } from '../shared/utils.js';
-import { type ToolTextResponse } from '../shared/types.js';
 
-function formatAllowedOrgsList(orgs: SanitizedOrgAuthorization[]): string {
-  return orgs
-    .map((o) => {
-      const username = o.username ?? 'unknown';
-      const alias = o.aliases?.[0];
-      return alias ? `  - ${alias} (${username})` : `  - ${username}`;
-    })
-    .join('\n');
-}
+import { type ToolTextResponse } from '../shared/types.js';
 
 export async function suggestUsername(orgService: OrgService): Promise<{
   suggestedUsername: string | undefined;
@@ -41,39 +32,18 @@ export async function suggestUsername(orgService: OrgService): Promise<{
   let aliasForReference: string | undefined;
 
   const allAllowedOrgs = await orgService.getAllowedOrgs();
-  const defaultTargetOrg = await orgService.getDefaultTargetOrg();
-  const defaultTargetDevHub = await orgService.getDefaultTargetDevHub();
 
-  const targetOrgLocation = defaultTargetOrg?.location ? `(${defaultTargetOrg.location}) ` : '';
-  const targetDevHubLocation = defaultTargetDevHub?.location ? `(${defaultTargetDevHub.location}) ` : '';
-
-  if (allAllowedOrgs.length === 1) {
+  if (allAllowedOrgs.length === 0) {
+    reasoning = 'Error: no allowed orgs found. Check the MCP server startup args for allowlisted orgs.';
+  } else if (allAllowedOrgs.length === 1) {
     suggestedUsername = allAllowedOrgs[0].username;
     aliasForReference = allAllowedOrgs[0].aliases?.[0];
     reasoning = 'it was the only org found in the MCP Servers allowlisted orgs';
-  } else if (allAllowedOrgs.length > 1) {
-    // Multiple orgs are allowed. The global ~/.sf/config.json target-org is intentionally
-    // NOT used as an automatic selection signal: it caused the wrong-org routing bug
-    // (see .planning/debug/run-soql-query-wrong-org.md). The only valid selection is an
-    // explicit usernameOrAlias from the caller. List all allowed orgs and ask the user.
-    const orgList = formatAllowedOrgsList(allAllowedOrgs);
-
-    // Surface the config default as an informational hint only — never as a binding selection.
-    const defaultHint = defaultTargetOrg?.value
-      ? ` The ${targetOrgLocation}default target-org is "${defaultTargetOrg.value}", but this may not match the intended org.`
-      : '';
-
-    suggestedUsername = undefined;
-    reasoning =
-      `Multiple orgs are available in the MCP server's allowlist.${defaultHint} ` +
-      `Ask the user which org they want to use. Available orgs:\n${orgList}`;
-  } else if (defaultTargetDevHub?.value) {
-    const foundOrg = orgService.findOrgByUsernameOrAlias(allAllowedOrgs, defaultTargetDevHub.value);
-    suggestedUsername = foundOrg?.username;
-    aliasForReference = foundOrg?.aliases?.[0];
-    reasoning = `it is the default ${targetDevHubLocation}dev hub org`;
   } else {
-    reasoning = 'Error: no org was inferred. Ask the user to specify one';
+    // Multiple orgs — do NOT auto-select based on global default.
+    // Silently binding to the default target-org can route queries to the wrong org (e.g. Live instead of Staging).
+    const orgList = allAllowedOrgs.map(o => `${o.aliases?.[0] ?? o.username} (${o.username})`).join(', ');
+    reasoning = `Multiple allowed orgs found: ${orgList}. Please ask the user which org to use.`;
   }
 
   return {
@@ -91,7 +61,7 @@ export async function suggestUsername(orgService: OrgService): Promise<{
  * Parameters:
  * - defaultTargetOrg: Force lookup of default target org (optional)
  * - defaultDevHub: Force lookup of default dev hub (optional)
- * - directory: OPTIONAL — not required for username resolution.
+ * - directory: The directory to run this tool from
  *
  * Returns:
  * - textResponse: Username/alias and org configuration
@@ -100,7 +70,7 @@ export async function suggestUsername(orgService: OrgService): Promise<{
 export const getUsernameParamsSchema = z.object({
   defaultTargetOrg: z.boolean().optional().default(false).describe('Resolve the default target org username'),
   defaultDevHub: z.boolean().optional().default(false).describe('Resolve the default target devhub org username'),
-  directory: z.string().optional().describe('OPTIONAL — not required for username resolution.'),
+  directory: z.string().optional().describe('Salesforce DX project directory (optional for this tool)'),
 });
 
 type InputArgs = z.infer<typeof getUsernameParamsSchema>;
@@ -140,6 +110,8 @@ If it's not clear which type of org to resolve, set both defaultTargetOrg and de
       outputSchema: undefined,
       annotations: {
         readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
         openWorldHint: false,
       },
     };
@@ -169,7 +141,8 @@ UNLESS THE USER SPECIFIES OTHERWISE, use this username (.value) for the "usernam
 
       if (!suggestedUsername) {
         return textResponse(
-          `Cannot automatically determine which org to use. ${reasoning}\n\nAsk the user to specify which org they want to use, then pass the chosen username or alias as the "usernameOrAlias" parameter.`,
+          "No suggested username found. Please specify a username or alias explicitly. Also check the MCP server's startup args for allowlisting orgs.",
+          true,
         );
       }
 
@@ -180,10 +153,11 @@ YOU MUST inform the user that we are going to use "${suggestedUsername}" ${
 YOU MUST explain the reasoning for selecting this org, which is: "${reasoning}"
 UNLESS THE USER SPECIFIES OTHERWISE, use this username for the "usernameOrAlias" parameter in future Tool calls.`);
     } catch (error) {
-      return textResponse(
-        `Failed to determine appropriate username: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        true,
-      );
+      const err = error instanceof Error ? error : new Error(String(error));
+      return toolError(`Failed to determine appropriate username: ${err.message}`, {
+        recovery: 'Check that orgs are authorized. Run list_all_orgs to see available orgs, or check MCP server startup args for allowlisted orgs.',
+        category: classifyError(err),
+      });
     }
   }
 }

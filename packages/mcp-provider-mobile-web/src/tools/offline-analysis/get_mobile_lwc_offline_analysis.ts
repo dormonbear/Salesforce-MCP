@@ -77,6 +77,9 @@ export class OfflineAnalysisTool extends McpTool<InputArgsShape, OutputArgsShape
       outputSchema: ExpertsCodeAnalysisIssuesSchema.shape,
       annotations: {
         readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
       },
     };
   }

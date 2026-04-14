@@ -16,33 +16,18 @@
 
 /* eslint-disable no-console */
 
-import { TOOLSETS } from '@salesforce/mcp-provider-api';
+import { TOOLSETS } from '@dormon/mcp-provider-api';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { Command, Flags, ux } from '@oclif/core';
 import Cache from './utils/cache.js';
+import { resolveSymbolicOrgs } from './utils/auth.js';
 import { Telemetry } from './telemetry.js';
 import { SfMcpServer } from './sf-mcp-server.js';
-import { registerToolsets } from './utils/registry-utils.js';
+import { registerToolsets, registerResourcesFromProviders } from './utils/registry-utils.js';
+import { MCP_PROVIDER_REGISTRY } from './registry.js';
 import { Services } from './services.js';
+import { parseOrgPermissions } from './utils/org-permissions.js';
 
-/**
- * Sanitizes an array of org usernames by replacing specific orgs with a placeholder.
- * Special values (DEFAULT_TARGET_ORG, DEFAULT_TARGET_DEV_HUB, ALLOW_ALL_ORGS) are preserved.
- *
- * @param {string[]} input - Array of org identifiers to sanitize
- * @returns {string} Comma-separated string of sanitized org identifiers
- */
-function sanitizeOrgInput(input: string[]): string {
-  return input
-    .map((org) => {
-      if (org === 'DEFAULT_TARGET_ORG' || org === 'DEFAULT_TARGET_DEV_HUB' || org === 'ALLOW_ALL_ORGS') {
-        return org;
-      }
-
-      return 'SANITIZED_ORG';
-    })
-    .join(', ');
-}
 
 export default class McpServerCommand extends Command {
   public static summary = 'Start the Salesforce MCP server';
@@ -101,9 +86,6 @@ You can also use special values to control access to orgs:
       exclusive: ['dynamic-tools'],
     }),
     version: Flags.version(),
-    'no-telemetry': Flags.boolean({
-      summary: 'Disable telemetry',
-    }),
     debug: Flags.boolean({
       summary: 'Enable debug logging',
     }),
@@ -145,32 +127,23 @@ You can also use special values to control access to orgs:
   public async run(): Promise<void> {
     const { flags } = await this.parse(McpServerCommand);
 
-    if (!flags['no-telemetry']) {
-      this.telemetry = new Telemetry(this.config, {
-        toolsets: (flags.toolsets ?? []).join(', '),
-        orgs: sanitizeOrgInput(flags.orgs),
-      });
+    this.telemetry = new Telemetry();
 
-      await this.telemetry.start();
+    // Resolve symbolic org names (DEFAULT_TARGET_ORG, DEFAULT_TARGET_DEV_HUB) to actual
+    // usernames at startup. This eliminates per-call config reads that depend on
+    // process.cwd(), fixing the concurrent org race condition.
+    const resolvedOrgs = await resolveSymbolicOrgs(new Set(flags.orgs));
+    await Cache.safeSet('allowedOrgs', resolvedOrgs);
+    const resolvedOrgList = [...resolvedOrgs];
 
-      process.stdin.on('close', () => {
-        this.telemetry?.sendEvent('SERVER_STOPPED_SUCCESS');
-        this.telemetry?.stop();
-      });
-      
-      // Handle SIGTERM as a fallback to ensure telemetry is sent
-      // https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle#stdio
-      process.stdin.on('SIGTERM', () => {
-        this.telemetry?.sendEvent('SERVER_STOPPED_SUCCESS');
-        this.telemetry?.stop();
-      });
+    this.logToStderr(`Allowed orgs:\n${resolvedOrgList.map((org) => `- ${org}`).join('\n')}`);
+    const orgPermissions = parseOrgPermissions(process.env.ORG_PERMISSIONS);
+    if (orgPermissions.size > 0) {
+      this.logToStderr(`Org permissions:\n${[...orgPermissions.entries()].map(([org, perm]) => `- ${org}: ${perm}`).join('\n')}`);
     }
-
-    await Cache.safeSet('allowedOrgs', new Set(flags.orgs));
-    this.logToStderr(`Allowed orgs:\n${flags.orgs.map((org) => `- ${org}`).join('\n')}`);
     const server = new SfMcpServer(
       {
-        name: 'sf-mcp-server',
+        name: 'sf-mcp-server-enhanced',
         version: this.config.version,
         capabilities: {
           resources: {},
@@ -179,6 +152,9 @@ You can also use special values to control access to orgs:
       },
       {
         telemetry: this.telemetry,
+        orgPermissions,
+        authorizedOrgs: resolvedOrgList,
+        defaultOrg: resolvedOrgList[0],
       }
     );
 
@@ -191,6 +167,8 @@ You can also use special values to control access to orgs:
         'allow-non-ga-tools': flags['allow-non-ga-tools'],
         debug: flags.debug,
       },
+      orgPermissions,
+      authorizedOrgs: resolvedOrgList,
     });
 
     await registerToolsets(
@@ -202,24 +180,22 @@ You can also use special values to control access to orgs:
       services
     );
 
+    await registerResourcesFromProviders(MCP_PROVIDER_REGISTRY, services, server);
+
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    
-    console.error(`✅ Salesforce MCP Server v${this.config.version} running on stdio`);
+
+    // Handle SIGTERM for graceful shutdown
+    // https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle#stdio
+    process.on('SIGTERM', () => {
+      server.close();
+      setTimeout(() => process.exit(0), 5000);
+    });
+
+    console.error(`✅ sf-mcp-server-enhanced v${this.config.version} running on stdio`);
   }
 
   protected async catch(error: Error): Promise<void> {
-    if (!this.telemetry && !process.argv.includes('--no-telemetry')) {
-      this.telemetry = new Telemetry(this.config);
-      await this.telemetry.start();
-    }
-
-    // Track startup failures such as invalid flags, missing dependencies, or initialization errors
-    this.telemetry?.sendEvent('START_ERROR', {
-      error: error.message,
-      stack: error.stack,
-    });
-
     await super.catch(error);
   }
 }

@@ -1,9 +1,11 @@
 {
-  "name": "@salesforce/mcp",
-  "version": "0.30.4",
-  "description": "MCP Server for interacting with Salesforce instances",
+  "name": "@dormon/salesforce-mcp",
+  "version": "0.0.6",
+  "description": "Enhanced MCP Server for interacting with Salesforce instances",
   "bin": {
-    "sf-mcp-server": "bin/run.js"
+    "sf-mcp-server-enhanced": "bin/run.js",
+    "salesforce-mcp": "bin/run.js",
+    "dormon-salesforce-mcp": "bin/run.js"
   },
   "types": "lib/index.d.ts",
   "license": "Apache-2.0",
@@ -18,13 +20,18 @@
     "link-check": "wireit",
     "lint": "wireit",
     "test": "wireit",
-    "test:only": "wireit"
+    "test:only": "wireit",
+    "prepublishOnly": "yarn build"
   },
-  "repository": "salesforcecli/mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dormonbear/Salesforce-MCP.git",
+    "directory": "packages/mcp"
+  },
   "bugs": {
-    "url": "https://github.com/salesforcecli/mcp/issues"
+    "url": "https://github.com/dormonbear/Salesforce-MCP/issues"
   },
-  "homepage": "https://github.com/salesforcecli/mcp",
+  "homepage": "https://github.com/dormonbear/Salesforce-MCP",
   "files": [
     "bin",
     "lib",
@@ -44,8 +51,8 @@
     "@salesforce/apex-node": "^8.2.1",
     "@salesforce/core": "^8.24.3",
     "@salesforce/kit": "^3.1.6",
-    "@salesforce/mcp-provider-api": "0.6.0",
-    "@salesforce/mcp-provider-dx-core": "0.9.5",
+    "@dormon/mcp-provider-api": "0.0.6",
+    "@dormon/mcp-provider-dx-core": "0.0.6",
     "@salesforce/mcp-provider-code-analyzer": "0.7.1",
     "@salesforce/mcp-provider-lwc-experts": "0.6.10",
     "@salesforce/mcp-provider-aura-experts": "0.3.7",
@@ -55,7 +62,6 @@
     "@salesforce/mcp-provider-metadata-enrichment": "0.1.5",
     "@salesforce/source-deploy-retrieve": "^12.31.7",
     "@salesforce/source-tracking": "^7.8.2",
-    "@salesforce/telemetry": "^6.8.0",
     "@salesforce/ts-types": "^2.0.11",
     "zod": "^3.25.76"
   },
@@ -84,8 +90,8 @@
     "access": "public"
   },
   "oclif": {
-    "bin": "sf-mcp-server",
-    "dirname": "sf-mcp-server",
+    "bin": "sf-mcp-server-enhanced",
+    "dirname": "sf-mcp-server-enhanced",
     "commands": {
       "strategy": "single",
       "target": "./lib/index.js"

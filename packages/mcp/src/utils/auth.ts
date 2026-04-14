@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-import { AuthInfo, Connection, ConfigAggregator, OrgConfigProperties, type OrgAuthorization } from '@salesforce/core';
-import { type OrgConfigInfo, type SanitizedOrgAuthorization } from '@salesforce/mcp-provider-api';
+import { AuthInfo, Connection, ConfigAggregator, OrgConfigProperties, StateAggregator, type OrgAuthorization } from '@salesforce/core';
+import { type OrgConfigInfo, type SanitizedOrgAuthorization } from '@dormon/mcp-provider-api';
 import Cache from './cache.js';
 
 /**
@@ -39,20 +39,17 @@ export function sanitizeOrgs(orgs: OrgAuthorization[]): SanitizedOrgAuthorizatio
   }));
 }
 
-// This function is the main entry point for Tools to get an allowlisted Connection
-export async function getConnection(username: string): Promise<Connection> {
-  // We get all allowed orgs each call in case the directory has changed (default configs)
-  const allOrgs = await getAllAllowedOrgs();
-  const foundOrg = findOrgByUsernameOrAlias(allOrgs, username);
+// This function is the main entry point for Tools to get an allowlisted Connection.
+// The middleware in sf-mcp-server.ts already validates that `username` is in the
+// authorized org list, so we skip redundant per-call config reads here.
+// We still need to resolve aliases to actual usernames since AuthInfo.create()
+// requires the real username (e.g. "user@example.com"), not an alias.
+export async function getConnection(usernameOrAlias: string): Promise<Connection> {
+  // Resolve alias to actual username if needed (lightweight, no config file reads)
+  const stateAggregator = await StateAggregator.getInstance();
+  const resolvedUsername = stateAggregator.aliases.getUsername(usernameOrAlias) ?? usernameOrAlias;
 
-  if (!foundOrg)
-    return Promise.reject(
-      new Error(
-        'No org found with the provided username/alias. Ask the user to specify one or check their MCP Server startup config.'
-      )
-    );
-
-  const authInfo = await AuthInfo.create({ username: foundOrg.username });
+  const authInfo = await AuthInfo.create({ username: resolvedUsername });
   const connection = await Connection.create({ authInfo });
   return connection;
 }
@@ -123,16 +120,9 @@ export async function filterAllowedOrgs(
   });
 }
 
-// Helper function to get default config for a property
-// Values are cached based on ConfigInfo path after first retrieval
-// This is to prevent manipulation of the config file after server start
 async function getDefaultConfig(
   property: OrgConfigProperties.TARGET_ORG | OrgConfigProperties.TARGET_DEV_HUB
 ): Promise<OrgConfigInfo | undefined> {
-  // If the directory changes, the ConfigAggregator singleton does not update.
-  // It continues to use the old local or global config instead.
-  // We call clearInstance on the singleton to read the new config.
-  await ConfigAggregator.clearInstance();
   const aggregator = await ConfigAggregator.create();
   const config = aggregator.getInfo(property);
 
@@ -151,4 +141,58 @@ export async function getDefaultTargetOrg(): Promise<OrgConfigInfo | undefined> 
 
 export async function getDefaultTargetDevHub(): Promise<OrgConfigInfo | undefined> {
   return getDefaultConfig(OrgConfigProperties.TARGET_DEV_HUB);
+}
+
+/**
+ * Resolves symbolic org names (DEFAULT_TARGET_ORG, DEFAULT_TARGET_DEV_HUB) to actual
+ * usernames by reading ConfigAggregator once. Called at startup so per-call config reads
+ * are eliminated, fixing the process.cwd() race condition.
+ *
+ * @param orgs - Set of org identifiers (may include symbolic names)
+ * @returns New set with symbolic names replaced by resolved usernames
+ */
+export async function resolveSymbolicOrgs(orgs: Set<string>): Promise<Set<string>> {
+  const resolved = new Set<string>();
+
+  // Collect symbolic names that need resolution
+  const needsTargetOrg = orgs.has('DEFAULT_TARGET_ORG');
+  const needsDevHub = orgs.has('DEFAULT_TARGET_DEV_HUB');
+
+  // Resolve symbolic names in a single ConfigAggregator.create() call
+  let targetOrgUsername: string | undefined;
+  let devHubUsername: string | undefined;
+
+  if (needsTargetOrg || needsDevHub) {
+    try {
+      const aggregator = await ConfigAggregator.create();
+
+      if (needsTargetOrg) {
+        const config = aggregator.getInfo(OrgConfigProperties.TARGET_ORG);
+        if (config.value && typeof config.value === 'string') {
+          targetOrgUsername = config.value;
+        }
+      }
+
+      if (needsDevHub) {
+        const config = aggregator.getInfo(OrgConfigProperties.TARGET_DEV_HUB);
+        if (config.value && typeof config.value === 'string') {
+          devHubUsername = config.value;
+        }
+      }
+    } catch {
+      // If ConfigAggregator fails, keep symbolic values (graceful degradation)
+    }
+  }
+
+  for (const org of orgs) {
+    if (org === 'DEFAULT_TARGET_ORG') {
+      resolved.add(targetOrgUsername ?? 'DEFAULT_TARGET_ORG');
+    } else if (org === 'DEFAULT_TARGET_DEV_HUB') {
+      resolved.add(devHubUsername ?? 'DEFAULT_TARGET_DEV_HUB');
+    } else {
+      resolved.add(org);
+    }
+  }
+
+  return resolved;
 }

@@ -6,7 +6,7 @@ import { fetchWorkItemByName } from "../getWorkItems.js";
 import { fetchWorkItemByNameMP } from "../getWorkItemsMP.js";
 import { isManagedPackageDevopsOrg } from "../shared/orgType.js";
 import { normalizeAndValidateRepoPath } from "../shared/pathUtils.js";
-import { usernameOrAliasParam } from "../shared/params.js";
+import { usernameOrAliasParam } from "@salesforce/mcp-provider-api";
 
 const inputSchema = z.object({
   usernameOrAlias: usernameOrAliasParam.optional(),
@@ -84,6 +84,12 @@ export class SfDevopsDetectConflict extends McpTool<InputArgsShape, OutputArgsSh
       - After detection, call 'resolve_devops_center_merge_conflict' to guide the user through conflict resolution.`,
       inputSchema: inputSchema.shape,
       outputSchema: undefined,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
     };
   }
 

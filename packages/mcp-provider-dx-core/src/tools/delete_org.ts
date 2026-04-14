@@ -17,7 +17,7 @@
 import { z } from 'zod';
 import { AuthRemover, Org } from '@salesforce/core';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, type McpToolConfig, ReleaseState, type Services, Toolset } from '@dormon/mcp-provider-api';
 import { textResponse, connectionHeader, requireUsernameOrAlias } from '../shared/utils.js';
 import { usernameOrAliasParam } from '../shared/params.js';
 
@@ -33,7 +33,7 @@ import { usernameOrAliasParam } from '../shared/params.js';
  */
 
 const deleteOrgParams = z.object({
-  directory: z.string().optional().describe('OPTIONAL — not required for deleting orgs. Pure org API.'),
+  directory: z.string().optional().describe('Salesforce DX project directory (optional for this tool)'),
   usernameOrAlias: usernameOrAliasParam,
 });
 
@@ -77,29 +77,26 @@ Can you delete test-fe2n4tc8pgku@example.com`,
   }
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
-    const orgService = this.services.getOrgService();
-    const allowedOrgs = (await orgService.getAllowedOrgs()).flatMap((o) => [
-      ...(o.aliases ?? []),
-      ...(o.username ? [o.username] : []),
-    ]);
-    let usernameOrAlias: string;
+    const allowedOrgs = (await this.services.getOrgService().getAllowedOrgs()).flatMap((o) => [o.username, ...(o.aliases ?? [])].filter(Boolean) as string[]);
     try {
-      usernameOrAlias = requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
+      requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
     } catch (e) {
-      return textResponse(e instanceof Error ? e.message : String(e), true);
+      return textResponse((e as Error).message, true);
     }
 
     try {
-      const connection = await orgService.getConnection(usernameOrAlias);
+      const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
       const org = await Org.create({ connection });
 
       await org.delete();
-      return textResponse(`${connectionHeader(connection)}\n\nSuccessfully deleted ${usernameOrAlias}`);
+      return textResponse(`${connectionHeader(connection)}\n\nSuccessfully deleted ${input.usernameOrAlias}`);
     } catch (e) {
       if (e instanceof Error && e.name === 'DomainNotFoundError') {
+        // the org has expired, so remote operations won't work
+        // let's clean up the files locally
         const authRemover = await AuthRemover.create();
-        await authRemover.removeAuth(usernameOrAlias);
-        return textResponse(`Successfully deleted ${usernameOrAlias}`);
+        await authRemover.removeAuth(input.usernameOrAlias);
+        return textResponse(`Successfully deleted ${input.usernameOrAlias}`);
       }
       return textResponse(`Failed to delete org: ${e instanceof Error ? e.message : 'Unknown error'}`, true);
     }

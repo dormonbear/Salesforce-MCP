@@ -15,9 +15,9 @@
  */
 
 import { z } from 'zod';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, type McpToolConfig, ReleaseState, type Services, Toolset, toolError, classifyError } from '@dormon/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { textResponse } from '../shared/utils.js';
+
 
 /*
  * List all Salesforce orgs
@@ -25,19 +25,32 @@ import { textResponse } from '../shared/utils.js';
  * Lists all configured Salesforce orgs.
  *
  * Parameters:
- * - directory: OPTIONAL — not required for listing orgs
+ * - directory: directory to change to before running the command
  *
  * Returns:
  * - textResponse: List of configured Salesforce orgs
  */
 
 export const listAllOrgsParamsSchema = z.object({
-  directory: z.string().optional().describe('OPTIONAL — not required for listing orgs.'),
+  directory: z.string().optional().describe('Salesforce DX project directory (optional for this tool)'),
+});
+
+const listOrgsOutputSchema = z.object({
+  orgs: z.array(z.object({
+    username: z.string().optional(),
+    aliases: z.array(z.string()).nullable().optional(),
+    instanceUrl: z.string().optional(),
+    orgId: z.string().optional(),
+    isScratchOrg: z.boolean().optional(),
+    isDevHub: z.boolean().optional(),
+    isSandbox: z.boolean().optional(),
+    isExpired: z.union([z.boolean(), z.literal('unknown')]).optional(),
+  })),
 });
 
 type InputArgs = z.infer<typeof listAllOrgsParamsSchema>;
 type InputArgsShape = typeof listAllOrgsParamsSchema.shape;
-type OutputArgsShape = z.ZodRawShape;
+type OutputArgsShape = typeof listOrgsOutputSchema.shape;
 
 export class ListAllOrgsMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
   public constructor(private readonly services: Services) {
@@ -69,9 +82,11 @@ Can you list all Salesforce orgs for me
 List all Salesforce orgs
 List all orgs`,
       inputSchema: listAllOrgsParamsSchema.shape,
-      outputSchema: undefined,
+      outputSchema: listOrgsOutputSchema.shape,
       annotations: {
         readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
         openWorldHint: false,
       },
     };
@@ -80,9 +95,17 @@ List all orgs`,
   public async exec(_input: InputArgs): Promise<CallToolResult> {
     try {
       const orgs = await this.services.getOrgService().getAllowedOrgs();
-      return textResponse(`List of configured Salesforce orgs:\n\n${JSON.stringify(orgs, null, 2)}`);
+      return {
+        isError: false,
+        content: [{ type: 'text' as const, text: `List of configured Salesforce orgs:\n\n${JSON.stringify(orgs, null, 2)}` }],
+        structuredContent: { orgs },
+      };
     } catch (error) {
-      return textResponse(`Failed to list orgs: ${error instanceof Error ? error.message : 'Unknown error'}`, true);
+      const err = error instanceof Error ? error : new Error(String(error));
+      return toolError(`Failed to list orgs: ${err.message}`, {
+        recovery: 'Check that at least one org is authorized. Re-authenticate with "sf org login" if auth expired.',
+        category: classifyError(err),
+      });
     }
   }
 }

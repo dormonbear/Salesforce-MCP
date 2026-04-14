@@ -24,7 +24,7 @@ import {
   Toolset,
   TOOLSETS,
   Versioned,
-} from '@salesforce/mcp-provider-api';
+} from '@dormon/mcp-provider-api';
 import { SfMcpServer } from '../sf-mcp-server.js';
 import { MCP_PROVIDER_REGISTRY } from '../registry.js';
 import { addTool, isToolRegistered } from '../utils/tools.js';
@@ -135,6 +135,9 @@ async function registerTools(
     }
     const registeredTool = server.registerTool(tool.getName(), tool.getConfig(), (...args) => tool.exec(...args));
     const toolsets = tool.getToolsets();
+    if (toolsets.includes(Toolset.LWC_EXPERTS)) {
+      server.markToolAsSerialized(tool.getName());
+    }
     if (useDynamicTools && !toolsets.includes(Toolset.CORE)) {
       ux.stderr(
         `* Registering tool '${tool.getName()}' but marking it as disabled for now because the server is set for dynamic tool loading.`
@@ -173,6 +176,36 @@ async function createToolRegistryFromProviders(
     }
   }
   return registry;
+}
+
+export async function registerResourcesFromProviders(
+  providers: McpProvider[],
+  services: Services,
+  server: SfMcpServer
+): Promise<void> {
+  const resourcePromises = providers.map((provider) => {
+    validateMcpProviderVersion(provider);
+    return provider.provideResources(services);
+  });
+  const allResources = (await Promise.all(resourcePromises)).flat();
+
+  for (const resource of allResources) {
+    if (resource.kind === 'McpResource') {
+      server.registerResource(
+        resource.getName(),
+        resource.getUri(),
+        resource.getConfig(),
+        (uri, extra) => resource.read(uri, extra)
+      );
+    } else {
+      server.registerResource(
+        resource.getName(),
+        resource.getTemplate(),
+        resource.getConfig(),
+        (uri, variables, extra) => resource.read(uri, variables, extra)
+      );
+    }
+  }
 }
 
 /**

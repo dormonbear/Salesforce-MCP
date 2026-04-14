@@ -20,7 +20,7 @@ import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   directoryParam,
   usernameOrAliasParam,
-} from "@salesforce/mcp-provider-dx-core";
+} from "@salesforce/mcp-provider-api";
 import {
   McpTool,
   McpToolConfig,
@@ -153,7 +153,6 @@ export class EnrichMetadataMcpTool extends McpTool<InputArgsShape, OutputArgsSha
         };
       }
   
-      process.chdir(input.directory);
       const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
       const project = await SfProject.resolve(input.directory);
   

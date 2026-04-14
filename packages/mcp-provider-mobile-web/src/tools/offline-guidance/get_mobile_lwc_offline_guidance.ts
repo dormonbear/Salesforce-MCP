@@ -59,6 +59,9 @@ export class OfflineGuidanceTool extends McpTool<InputArgsShape, OutputArgsShape
       outputSchema: ExpertsReviewInstructionsSchema.shape,
       annotations: {
         readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
       },
     };
   }

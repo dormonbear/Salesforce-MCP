@@ -18,7 +18,8 @@ import { z } from 'zod';
 import { TestLevel, TestResult, TestRunIdResult, TestService } from '@salesforce/apex-node';
 import { ApexTestResultOutcome } from '@salesforce/apex-node/lib/src/tests/types.js';
 import { Duration, ensureArray } from '@salesforce/kit';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { McpTool, type McpToolConfig, ReleaseState, type Services, Toolset, toolError, classifyError } from '@dormon/mcp-provider-api';
+import { SfError } from '@salesforce/core';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { usernameOrAliasParam } from '../shared/params.js';
 import { textResponse, connectionHeader, requireUsernameOrAlias } from '../shared/utils.js';
@@ -80,12 +81,28 @@ RunSpecifiedTests="Run the Apex tests I specify, these will be specified in the 
     .default(false)
     .describe('set to true if a user wants codecoverage calculated by the server'),
   usernameOrAlias: usernameOrAliasParam,
-  directory: z.string().optional().describe('OPTIONAL — not required for running Apex tests. TestService uses the org connection, not a local project.'),
+  directory: z.string().optional().describe('Salesforce DX project directory (optional for this tool)'),
+});
+
+const apexTestOutputSchema = z.object({
+  testRunId: z.string().optional(),
+  summary: z.object({
+    outcome: z.string().optional(),
+    testsRan: z.number().optional(),
+    passing: z.number().optional(),
+    failing: z.number().optional(),
+    skipped: z.number().optional(),
+    passRate: z.string().optional(),
+    failRate: z.string().optional(),
+    testExecutionTimeInMs: z.number().optional(),
+    orgId: z.string().optional(),
+  }).optional(),
+  tests: z.array(z.record(z.unknown())).optional(),
 });
 
 type InputArgs = z.infer<typeof runApexTestsParam>;
 type InputArgsShape = typeof runApexTestsParam.shape;
-type OutputArgsShape = z.ZodRawShape;
+type OutputArgsShape = typeof apexTestOutputSchema.shape;
 
 export class TestApexMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
   public constructor(private readonly services: Services) {
@@ -124,9 +141,12 @@ Test the "mySuite" suite asynchronously. I’ll check results later.
 Run tests for this file and include coverage
 What are the results for 707XXXXXXXXXXXX`,
       inputSchema: runApexTestsParam.shape,
-      outputSchema: undefined,
+      outputSchema: apexTestOutputSchema.shape,
       annotations: {
-        openWorldHint: false,
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
       },
     };
   }
@@ -141,19 +161,14 @@ What are the results for 707XXXXXXXXXXXX`,
       return textResponse("You can't specify which tests to run without setting testLevel='RunSpecifiedTests'", true);
     }
 
-    const orgService = this.services.getOrgService();
-    const allowedOrgs = (await orgService.getAllowedOrgs()).flatMap((o) => [
-      ...(o.aliases ?? []),
-      ...(o.username ? [o.username] : []),
-    ]);
-    let usernameOrAlias: string;
+    const allowedOrgs = (await this.services.getOrgService().getAllowedOrgs()).flatMap((o) => [o.username, ...(o.aliases ?? [])].filter(Boolean) as string[]);
     try {
-      usernameOrAlias = requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
+      requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
     } catch (e) {
-      return textResponse(e instanceof Error ? e.message : String(e), true);
+      return textResponse((e as Error).message, true);
     }
 
-    const connection = await orgService.getConnection(usernameOrAlias);
+    const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
     try {
       const testService = new TestService(connection);
       let result: TestResult | TestRunIdResult;
@@ -178,7 +193,11 @@ What are the results for 707XXXXXXXXXXXX`,
           Duration.minutes(10),
         );
         if (input.async) {
-          return textResponse(`${connectionHeader(connection)}\n\nTest Run Id: ${JSON.stringify(result)}`);
+          const asyncResult = result as TestRunIdResult;
+          return {
+            content: [{ type: 'text' as const, text: `${connectionHeader(connection)}\n\nTest Run Id: ${JSON.stringify(result)}` }],
+            structuredContent: { testRunId: asyncResult.testRunId },
+          };
         }
         // the user waited for the full results, we know they're TestResult
         result = result as TestResult;
@@ -189,9 +208,33 @@ What are the results for 707XXXXXXXXXXXX`,
         result.tests = result.tests.filter((test) => test.outcome === ApexTestResultOutcome.Fail);
       }
 
-      return textResponse(`${connectionHeader(connection)}\n\nTest result: ${JSON.stringify(result)}`);
+      return {
+        content: [{ type: 'text' as const, text: `${connectionHeader(connection)}\n\nTest result: ${JSON.stringify(result)}` }],
+        structuredContent: {
+          testRunId: result.summary?.testRunId,
+          summary: result.summary ? {
+            outcome: result.summary.outcome,
+            testsRan: result.summary.testsRan,
+            passing: result.summary.passing,
+            failing: result.summary.failing,
+            skipped: result.summary.skipped,
+            passRate: result.summary.passRate,
+            failRate: result.summary.failRate,
+            testExecutionTimeInMs: result.summary.testExecutionTimeInMs,
+            orgId: result.summary.orgId,
+          } : undefined,
+          tests: result.tests as Record<string, unknown>[],
+        },
+      };
     } catch (e) {
-      return textResponse(`Failed to run Apex Tests: ${e instanceof Error ? e.message : 'Unknown error'}`, true);
+      const err = SfError.wrap(e);
+      const recovery = err.actions?.join(' ')
+        ?? 'Verify the test class names exist in the org. Use run_soql_query with "SELECT Name FROM ApexClass WHERE Name IN (\'ClassName\')" to confirm.';
+
+      return toolError(`Failed to run Apex tests: ${err.message}`, {
+        recovery,
+        category: classifyError(err),
+      });
     }
   }
 }

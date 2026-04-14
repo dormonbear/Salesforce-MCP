@@ -15,8 +15,8 @@
  */
 
 import { z } from 'zod';
-import { Org, StateAggregator, User } from '@salesforce/core';
-import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
+import { Org, SfError, StateAggregator, User } from '@salesforce/core';
+import { McpTool, type McpToolConfig, ReleaseState, type Services, Toolset, toolError, classifyError } from '@dormon/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { usernameOrAliasParam } from '../shared/params.js';
 import { textResponse, connectionHeader, requireUsernameOrAlias } from '../shared/utils.js';
@@ -58,12 +58,17 @@ USAGE EXAMPLE:
 Assign the permission set MyPermSet.
 Set the permission set MyPermSet on behalf of test-3uyb8kmftiu@example.com.
 Set the permission set MyPermSet on behalf of my-alias.`),
-  directory: z.string().optional().describe('OPTIONAL — not required for permission set assignment.'),
+  directory: z.string().optional().describe('Salesforce DX project directory (optional for this tool)'),
+});
+
+const assignPermSetOutputSchema = z.object({
+  permissionSetName: z.string(),
+  assignedTo: z.string(),
 });
 
 type InputArgs = z.infer<typeof assignPermissionSetParamsSchema>;
 type InputArgsShape = typeof assignPermissionSetParamsSchema.shape;
-type OutputArgsShape = z.ZodRawShape;
+type OutputArgsShape = typeof assignPermSetOutputSchema.shape;
 
 export class AssignPermissionSetMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
   public constructor(private readonly services: Services) {
@@ -87,35 +92,34 @@ export class AssignPermissionSetMcpTool extends McpTool<InputArgsShape, OutputAr
       title: 'Assign Permission Set',
       description: 'Assign a permission set to one or more org users.',
       inputSchema: assignPermissionSetParamsSchema.shape,
-      outputSchema: undefined,
+      outputSchema: assignPermSetOutputSchema.shape,
       annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
         openWorldHint: true,
       },
     };
   }
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
+    const allowedOrgs = (await this.services.getOrgService().getAllowedOrgs()).flatMap((o) => [o.username, ...(o.aliases ?? [])].filter(Boolean) as string[]);
     try {
-      const orgService = this.services.getOrgService();
-      const allowedOrgs = (await orgService.getAllowedOrgs()).flatMap((o) => [
-        ...(o.aliases ?? []),
-        ...(o.username ? [o.username] : []),
-      ]);
-      let usernameOrAlias: string;
-      try {
-        usernameOrAlias = requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
-      } catch (e) {
-        return textResponse(e instanceof Error ? e.message : String(e), true);
-      }
+      requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
+    } catch (e) {
+      return textResponse((e as Error).message, true);
+    }
+
+    try {
       // We build the connection from the usernameOrAlias
-      const connection = await orgService.getConnection(usernameOrAlias);
+      const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
 
       // We need to clear the instance so we know we have the most up to date aliases
       // If a user sets an alias after server start up, it was not getting picked up
       await StateAggregator.clearInstanceAsync();
       // Must NOT be nullish coalescing (??) In case the LLM uses and empty string
       const assignTo = (await StateAggregator.getInstance()).aliases.resolveUsername(
-        input.onBehalfOf || usernameOrAlias,
+        input.onBehalfOf || input.usernameOrAlias,
       );
 
       if (!assignTo.includes('@')) {
@@ -130,12 +134,20 @@ export class AssignPermissionSetMcpTool extends McpTool<InputArgsShape, OutputAr
 
       await user.assignPermissionSets(queryResult.Id, [input.permissionSetName]);
 
-      return textResponse(`${connectionHeader(connection)}\n\nAssigned ${input.permissionSetName} to ${assignTo}`);
+      return {
+        content: [{ type: 'text' as const, text: `${connectionHeader(connection)}\n\nAssigned ${input.permissionSetName} to ${assignTo}` }],
+        structuredContent: { permissionSetName: input.permissionSetName, assignedTo: assignTo },
+      };
     } catch (error) {
-      return textResponse(
-        `Failed to assign permission set: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        true,
-      );
+      const err = SfError.wrap(error);
+
+      const recovery = err.actions?.join(' ')
+        ?? 'Verify the permission set name is correct. Use run_soql_query with "SELECT Name FROM PermissionSet WHERE IsOwnedByProfile = false" to list assignable permission sets.';
+
+      return toolError(`Failed to assign permission set: ${err.message}`, {
+        recovery,
+        category: classifyError(err),
+      });
     }
   }
 }
