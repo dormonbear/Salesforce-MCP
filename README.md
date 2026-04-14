@@ -159,6 +159,21 @@ These are the available values for the `--orgs` flag:
 | `DEFAULT_TARGET_ORG`     | Allow access to your default org. If you've set a local default org in your DX project, the MCP server uses it. If not, the server uses a globally-set default org.                         |
 | `<username or alias>`    | Allow access to a specific org by specifying its username or alias.                                                                                                                         |
 
+### Org Routing (Multi-Org Safety)
+
+When multiple orgs are configured via `--orgs`, the MCP server enforces explicit org routing to prevent accidental operations against the wrong org:
+
+- **`usernameOrAlias` is mandatory** on every org-touching tool. The server never infers a target org from the global `~/.sf/config.json` `target-org` setting.
+- **When omitted**, tools return an actionable error listing all allowed orgs. AI clients must then ask the user which org to target.
+- **Every org-touching response** includes a `Connected to:` header identifying the username, instance URL, and org ID so callers can verify the target.
+
+The `directory` parameter requirement varies by tool:
+
+| Category | `directory` | Tools |
+|----------|------------|-------|
+| **Org-only** (no local project needed) | Optional | `run_soql_query`, `get_username`, `list_all_orgs`, `open_org`, `assign_permission_set`, `resume_tool_operation`, `run_apex_test`, `run_agent_test`, `create_org_snapshot`, `delete_org` |
+| **Project-required** (needs sfdx-project root) | Required | `deploy_metadata`, `retrieve_metadata`, `create_scratch_org` |
+
 ## Configure Toolsets
 
 The Salesforce DX MCP Server supports **toolsets**—a way to selectively enable different groups of MCP tools based on your needs. This allows you to run the MCP server with only the tools you require, which in turn reduces the LLM context.
