@@ -1,6 +1,6 @@
 {
   "name": "@dormon/salesforce-mcp",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Enhanced MCP Server for interacting with Salesforce instances",
   "bin": {
     "sf-mcp-server-enhanced": "bin/run.js",
@@ -51,8 +51,8 @@
     "@salesforce/apex-node": "^8.2.1",
     "@salesforce/core": "^8.24.3",
     "@salesforce/kit": "^3.1.6",
-    "@dormon/mcp-provider-api": "0.0.6",
-    "@dormon/mcp-provider-dx-core": "0.0.6",
+    "@dormon/mcp-provider-api": "0.0.7",
+    "@dormon/mcp-provider-dx-core": "0.0.7",
     "@salesforce/mcp-provider-code-analyzer": "0.7.1",
     "@salesforce/mcp-provider-lwc-experts": "0.6.10",
     "@salesforce/mcp-provider-aura-experts": "0.3.7",
