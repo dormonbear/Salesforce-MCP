@@ -20,6 +20,13 @@ import type { OrgService, SanitizedOrgAuthorization, OrgConfigInfo } from '@sale
 import { suggestUsername } from '../../src/tools/get_username.js';
 
 /**
+ * T02 regression tests: get_username must NOT read global target-org for its selection logic.
+ *
+ * These tests assert the behavior BEFORE T03 removes the ConfigAggregator read.
+ * They are expected to FAIL until T03 is implemented.
+ */
+
+/**
  * Test for the suggestUsername bug:
  *
  * Bug: when multiple allowed orgs exist and the global target-org (e.g. OMNI_Admin)
@@ -154,5 +161,56 @@ describe('suggestUsername', () => {
 
     expect(hasListedOrgs).to.equal(true,
       'When multiple allowed orgs exist, the response must enumerate them or decline to suggest one automatically');
+  });
+
+  // T02: additional regression tests — global target-org must NOT be used as selection signal
+
+  it('T02: multi-org — suggestedUsername is undefined regardless of global target-org', async () => {
+    // Even when getDefaultTargetOrg returns a value, multi-org case must always return undefined
+    const orgService = makeOrgService(
+      [stagingOrg, adminOrg, sfoa],
+      { key: 'target-org', value: 'OMNI_Admin', path: '/fake/.sf/config.json' },
+    );
+    const result = await suggestUsername(orgService);
+    expect(result.suggestedUsername).to.equal(undefined,
+      'Multi-org scenario must never auto-select; suggestedUsername must be undefined');
+  });
+
+  it('T02: multi-org — reasoning contains all three org aliases', async () => {
+    const orgService = makeOrgService(
+      [stagingOrg, adminOrg, sfoa],
+      { key: 'target-org', value: 'OMNI_Admin', path: '/fake/.sf/config.json' },
+    );
+    const result = await suggestUsername(orgService);
+    // All three allowed orgs must appear in the reasoning so the user/AI can choose
+    expect(result.reasoning).to.include('OMNI_Staging');
+    expect(result.reasoning).to.include('OMNI_Admin');
+    expect(result.reasoning).to.include('SFOA_Live');
+  });
+
+  it('T02: single-org — binds to the single allowed org (no config read required)', async () => {
+    // When only one org is allowed, bind to it regardless of global config
+    const orgService = makeOrgService(
+      [stagingOrg],
+      // No default target org at all — should still work
+      undefined,
+    );
+    const result = await suggestUsername(orgService);
+    expect(result.suggestedUsername).to.equal('dormon.zhou@ef.cn.staging');
+    expect(result.aliasForReference).to.equal('OMNI_Staging');
+  });
+
+  it('T02: zero-org — returns actionable error naming zero allowed orgs', async () => {
+    const orgService = makeOrgService(
+      [],
+      undefined,
+    );
+    const result = await suggestUsername(orgService);
+    // When no orgs are allowed, the reasoning must indicate the problem
+    expect(result.suggestedUsername).to.equal(undefined);
+    expect(result.reasoning).to.satisfy(
+      (r: string) => r.includes('no org') || r.includes('Error') || r.includes('0') || r.includes('zero') || r.includes('no allowed'),
+      'Zero-org case must return an error-indicating reasoning string',
+    );
   });
 });
