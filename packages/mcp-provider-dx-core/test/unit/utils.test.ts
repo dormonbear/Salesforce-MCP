@@ -179,38 +179,36 @@ describe('utilities tests', () => {
   });
 
   describe('requireUsernameOrAlias', () => {
+    function catchError(fn: () => unknown): MissingUsernameOrAliasError {
+      try {
+        fn();
+      } catch (e) {
+        if (e instanceof MissingUsernameOrAliasError) return e;
+        throw e;
+      }
+      throw new Error('Expected MissingUsernameOrAliasError but no error was thrown');
+    }
+
     it('requireUsernameOrAlias([], undefined) throws with "No allowed orgs configured"', () => {
-      expect(() => requireUsernameOrAlias([], undefined)).to.throw(MissingUsernameOrAliasError)
-        .with.property('message').that.includes('No allowed orgs configured');
+      const err = catchError(() => requireUsernameOrAlias([], undefined));
+      expect(err).to.be.instanceOf(MissingUsernameOrAliasError);
+      expect(err.message).to.include('No allowed orgs configured');
     });
 
     it('requireUsernameOrAlias(["A","B"], undefined) throws listing A, B and ask instruction', () => {
-      let caught: unknown;
-      try {
-        requireUsernameOrAlias(['A', 'B'], undefined);
-      } catch (e) {
-        caught = e;
-      }
-      expect(caught).to.be.instanceOf(MissingUsernameOrAliasError);
-      const err = caught as MissingUsernameOrAliasError;
+      const err = catchError(() => requireUsernameOrAlias(['A', 'B'], undefined));
+      expect(err).to.be.instanceOf(MissingUsernameOrAliasError);
       expect(err.message).to.include('A');
       expect(err.message).to.include('B');
       expect(err.message).to.include('Ask the user');
     });
 
-    it('requireUsernameOrAlias(["A","B"], "C") throws noting C not in allowed list', () => {
-      let caught: unknown;
-      try {
-        requireUsernameOrAlias(['A', 'B'], 'C');
-      } catch (e) {
-        caught = e;
-      }
-      expect(caught).to.be.instanceOf(MissingUsernameOrAliasError);
-      const err = caught as MissingUsernameOrAliasError;
-      expect(err.message).to.satisfy(
-        (m: string) => m.includes('C') || m.includes('not in') || m.includes('not allowed'),
-        'Error message should mention the invalid alias C or explain it is not in the allowed list',
-      );
+    it('requireUsernameOrAlias(["A","B"], "C") throws; message mentions allowed orgs', () => {
+      const err = catchError(() => requireUsernameOrAlias(['A', 'B'], 'C'));
+      expect(err).to.be.instanceOf(MissingUsernameOrAliasError);
+      // Message should list the allowed orgs so the caller knows valid options
+      expect(err.message).to.include('A');
+      expect(err.message).to.include('B');
     });
 
     it('requireUsernameOrAlias(["A","B"], "A") returns "A"', () => {

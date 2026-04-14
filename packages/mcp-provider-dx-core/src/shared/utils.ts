@@ -32,6 +32,46 @@ export function connectionHeader(connection: Connection): string {
   return `Connected to: ${username} @ ${connection.instanceUrl} (orgId: ${orgId})`;
 }
 
+/**
+ * Formats a user-facing error message listing the allowed orgs.
+ * Used by requireUsernameOrAlias and tools' zero-org error branches.
+ */
+export function formatAllowedOrgsError(allowedOrgs: string[]): string {
+  if (allowedOrgs.length === 0) {
+    return 'No allowed orgs configured for this MCP server. Check the server startup --orgs config.';
+  }
+  return `Missing or invalid usernameOrAlias. Allowed orgs for this server: ${allowedOrgs.join(', ')}. Ask the user which org to target.`;
+}
+
+/**
+ * Thrown when a tool receives no usernameOrAlias or one not in the allowed list.
+ * Carries the allowed org list so callers can format actionable error messages.
+ */
+export class MissingUsernameOrAliasError extends Error {
+  public constructor(public readonly allowedOrgs: string[]) {
+    super(formatAllowedOrgsError(allowedOrgs));
+    this.name = 'MissingUsernameOrAliasError';
+  }
+}
+
+/**
+ * Validates that `provided` is non-empty and present in `allowed`.
+ *
+ * @param allowed - the org aliases/usernames this MCP server is configured for
+ * @param provided - the usernameOrAlias passed by the caller (may be undefined)
+ * @returns the validated usernameOrAlias string
+ * @throws MissingUsernameOrAliasError when validation fails
+ */
+export function requireUsernameOrAlias(allowed: string[], provided: string | undefined): string {
+  if (!provided || provided.trim() === '') {
+    throw new MissingUsernameOrAliasError(allowed);
+  }
+  if (!allowed.includes(provided)) {
+    throw new MissingUsernameOrAliasError(allowed);
+  }
+  return provided;
+}
+
 // TODO: break into two helpers? One for errors and one for success?
 export function textResponse(text: string, isError: boolean = false): ToolTextResponse {
   if (text === '') throw new Error('textResponse error: "text" cannot be empty');
