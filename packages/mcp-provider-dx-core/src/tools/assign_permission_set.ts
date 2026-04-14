@@ -18,8 +18,8 @@ import { z } from 'zod';
 import { Org, StateAggregator, User } from '@salesforce/core';
 import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
-import { textResponse } from '../shared/utils.js';
+import { usernameOrAliasParam } from '../shared/params.js';
+import { textResponse, connectionHeader, requireUsernameOrAlias } from '../shared/utils.js';
 
 /*
  * Assign permission set
@@ -58,7 +58,7 @@ USAGE EXAMPLE:
 Assign the permission set MyPermSet.
 Set the permission set MyPermSet on behalf of test-3uyb8kmftiu@example.com.
 Set the permission set MyPermSet on behalf of my-alias.`),
-  directory: directoryParam,
+  directory: z.string().optional().describe('OPTIONAL — not required for permission set assignment.'),
 });
 
 type InputArgs = z.infer<typeof assignPermissionSetParamsSchema>;
@@ -96,21 +96,26 @@ export class AssignPermissionSetMcpTool extends McpTool<InputArgsShape, OutputAr
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
     try {
-      if (!input.usernameOrAlias)
-        return textResponse(
-          'The usernameOrAlias parameter is required, if the user did not specify one use the #get_username tool',
-          true,
-        );
-      process.chdir(input.directory);
+      const orgService = this.services.getOrgService();
+      const allowedOrgs = (await orgService.getAllowedOrgs()).flatMap((o) => [
+        ...(o.aliases ?? []),
+        ...(o.username ? [o.username] : []),
+      ]);
+      let usernameOrAlias: string;
+      try {
+        usernameOrAlias = requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
+      } catch (e) {
+        return textResponse(e instanceof Error ? e.message : String(e), true);
+      }
       // We build the connection from the usernameOrAlias
-      const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
+      const connection = await orgService.getConnection(usernameOrAlias);
 
       // We need to clear the instance so we know we have the most up to date aliases
       // If a user sets an alias after server start up, it was not getting picked up
       await StateAggregator.clearInstanceAsync();
       // Must NOT be nullish coalescing (??) In case the LLM uses and empty string
       const assignTo = (await StateAggregator.getInstance()).aliases.resolveUsername(
-        input.onBehalfOf || input.usernameOrAlias,
+        input.onBehalfOf || usernameOrAlias,
       );
 
       if (!assignTo.includes('@')) {
@@ -125,7 +130,7 @@ export class AssignPermissionSetMcpTool extends McpTool<InputArgsShape, OutputAr
 
       await user.assignPermissionSets(queryResult.Id, [input.permissionSetName]);
 
-      return textResponse(`Assigned ${input.permissionSetName} to ${assignTo}`);
+      return textResponse(`${connectionHeader(connection)}\n\nAssigned ${input.permissionSetName} to ${assignTo}`);
     } catch (error) {
       return textResponse(
         `Failed to assign permission set: ${error instanceof Error ? error.message : 'Unknown error'}`,

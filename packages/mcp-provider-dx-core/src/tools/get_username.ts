@@ -19,7 +19,6 @@ import { McpTool, McpToolConfig, OrgConfigInfo, ReleaseState, Services, Toolset,
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { type OrgService } from '@salesforce/mcp-provider-api';
 import { textResponse } from '../shared/utils.js';
-import { directoryParam } from '../shared/params.js';
 import { type ToolTextResponse } from '../shared/types.js';
 
 function formatAllowedOrgsList(orgs: SanitizedOrgAuthorization[]): string {
@@ -92,7 +91,7 @@ export async function suggestUsername(orgService: OrgService): Promise<{
  * Parameters:
  * - defaultTargetOrg: Force lookup of default target org (optional)
  * - defaultDevHub: Force lookup of default dev hub (optional)
- * - directory: The directory to run this tool from
+ * - directory: OPTIONAL — not required for username resolution.
  *
  * Returns:
  * - textResponse: Username/alias and org configuration
@@ -101,7 +100,7 @@ export async function suggestUsername(orgService: OrgService): Promise<{
 export const getUsernameParamsSchema = z.object({
   defaultTargetOrg: z.boolean().optional().default(false).describe('Resolve the default target org username'),
   defaultDevHub: z.boolean().optional().default(false).describe('Resolve the default target devhub org username'),
-  directory: directoryParam,
+  directory: z.string().optional().describe('OPTIONAL — not required for username resolution.'),
 });
 
 type InputArgs = z.infer<typeof getUsernameParamsSchema>;
@@ -148,8 +147,6 @@ If it's not clear which type of org to resolve, set both defaultTargetOrg and de
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
     try {
-      process.chdir(input.directory);
-
       const generateResponse = (defaultFromConfig: OrgConfigInfo | undefined): ToolTextResponse =>
         textResponse(`ALWAYS notify the user the following 3 pieces of information:
 1. If it is default target-org or target-dev-hub ('.key' on the config)

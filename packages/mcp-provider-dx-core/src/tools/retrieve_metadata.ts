@@ -23,7 +23,7 @@ import { Duration } from '@salesforce/kit';
 import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
-import { textResponse } from '../shared/utils.js';
+import { textResponse, connectionHeader, requireUsernameOrAlias } from '../shared/utils.js';
 
 /*
  * Retrieve metadata from an org to your local project.
@@ -107,16 +107,19 @@ Retrieve X metadata from my org and ignore any conflicts between the local proje
       return textResponse("You can't specify both `sourceDir` and `manifest` parameters.", true);
     }
 
-    if (!input.usernameOrAlias)
-      return textResponse(
-        'The usernameOrAlias parameter is required, if the user did not specify one use the #get_username tool',
-        true,
-      );
+    const orgService = this.services.getOrgService();
+    const allowedOrgs = (await orgService.getAllowedOrgs()).flatMap((o) => [
+      ...(o.aliases ?? []),
+      ...(o.username ? [o.username] : []),
+    ]);
+    let usernameOrAlias: string;
+    try {
+      usernameOrAlias = requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
+    } catch (e) {
+      return textResponse(e instanceof Error ? e.message : String(e), true);
+    }
 
-    // needed for org allowlist to work
-    process.chdir(input.directory);
-
-    const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
+    const connection = await orgService.getConnection(usernameOrAlias);
     const project = await SfProject.resolve(input.directory);
 
     const org = await Org.create({ connection });
@@ -160,7 +163,7 @@ Retrieve X metadata from my org and ignore any conflicts between the local proje
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { zipFile, ...retrieveResult } = result.response;
 
-      return textResponse(`Retrieve result: ${JSON.stringify(retrieveResult)}`, !retrieveResult.success);
+      return textResponse(`${connectionHeader(connection)}\n\nRetrieve result: ${JSON.stringify(retrieveResult)}`, !retrieveResult.success);
       // }
     } catch (error) {
       return textResponse(

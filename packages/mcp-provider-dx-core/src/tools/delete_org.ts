@@ -18,8 +18,8 @@ import { z } from 'zod';
 import { AuthRemover, Org } from '@salesforce/core';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
-import { textResponse } from '../shared/utils.js';
-import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
+import { textResponse, connectionHeader, requireUsernameOrAlias } from '../shared/utils.js';
+import { usernameOrAliasParam } from '../shared/params.js';
 
 /*
  * Delete a locally authorized Salesforce org
@@ -33,7 +33,7 @@ import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
  */
 
 const deleteOrgParams = z.object({
-  directory: directoryParam,
+  directory: z.string().optional().describe('OPTIONAL — not required for deleting orgs. Pure org API.'),
   usernameOrAlias: usernameOrAliasParam,
 });
 
@@ -77,20 +77,29 @@ Can you delete test-fe2n4tc8pgku@example.com`,
   }
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
+    const orgService = this.services.getOrgService();
+    const allowedOrgs = (await orgService.getAllowedOrgs()).flatMap((o) => [
+      ...(o.aliases ?? []),
+      ...(o.username ? [o.username] : []),
+    ]);
+    let usernameOrAlias: string;
     try {
-      process.chdir(input.directory);
-      const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
+      usernameOrAlias = requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
+    } catch (e) {
+      return textResponse(e instanceof Error ? e.message : String(e), true);
+    }
+
+    try {
+      const connection = await orgService.getConnection(usernameOrAlias);
       const org = await Org.create({ connection });
 
       await org.delete();
-      return textResponse(`Successfully deleted ${input.usernameOrAlias}`);
+      return textResponse(`${connectionHeader(connection)}\n\nSuccessfully deleted ${usernameOrAlias}`);
     } catch (e) {
       if (e instanceof Error && e.name === 'DomainNotFoundError') {
-        // the org has expired, so remote operations won't work
-        // let's clean up the files locally
         const authRemover = await AuthRemover.create();
-        await authRemover.removeAuth(input.usernameOrAlias);
-        return textResponse(`Successfully deleted ${input.usernameOrAlias}`);
+        await authRemover.removeAuth(usernameOrAlias);
+        return textResponse(`Successfully deleted ${usernameOrAlias}`);
       }
       return textResponse(`Failed to delete org: ${e instanceof Error ? e.message : 'Unknown error'}`, true);
     }

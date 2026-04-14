@@ -20,8 +20,8 @@ import { ApexTestResultOutcome } from '@salesforce/apex-node/lib/src/tests/types
 import { Duration, ensureArray } from '@salesforce/kit';
 import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
-import { textResponse } from '../shared/utils.js';
+import { usernameOrAliasParam } from '../shared/params.js';
+import { textResponse, connectionHeader, requireUsernameOrAlias } from '../shared/utils.js';
 
 /*
  * Run Apex tests in a Salesforce org.
@@ -80,7 +80,7 @@ RunSpecifiedTests="Run the Apex tests I specify, these will be specified in the 
     .default(false)
     .describe('set to true if a user wants codecoverage calculated by the server'),
   usernameOrAlias: usernameOrAliasParam,
-  directory: directoryParam,
+  directory: z.string().optional().describe('OPTIONAL — not required for running Apex tests. TestService uses the org connection, not a local project.'),
 });
 
 type InputArgs = z.infer<typeof runApexTestsParam>;
@@ -141,16 +141,19 @@ What are the results for 707XXXXXXXXXXXX`,
       return textResponse("You can't specify which tests to run without setting testLevel='RunSpecifiedTests'", true);
     }
 
-    if (!input.usernameOrAlias)
-      return textResponse(
-        'The usernameOrAlias parameter is required, if the user did not specify one use the #get_username tool',
-        true,
-      );
+    const orgService = this.services.getOrgService();
+    const allowedOrgs = (await orgService.getAllowedOrgs()).flatMap((o) => [
+      ...(o.aliases ?? []),
+      ...(o.username ? [o.username] : []),
+    ]);
+    let usernameOrAlias: string;
+    try {
+      usernameOrAlias = requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
+    } catch (e) {
+      return textResponse(e instanceof Error ? e.message : String(e), true);
+    }
 
-    // needed for org allowlist to work
-    process.chdir(input.directory);
-
-    const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
+    const connection = await orgService.getConnection(usernameOrAlias);
     try {
       const testService = new TestService(connection);
       let result: TestResult | TestRunIdResult;
@@ -175,7 +178,7 @@ What are the results for 707XXXXXXXXXXXX`,
           Duration.minutes(10),
         );
         if (input.async) {
-          return textResponse(`Test Run Id: ${JSON.stringify(result)}`);
+          return textResponse(`${connectionHeader(connection)}\n\nTest Run Id: ${JSON.stringify(result)}`);
         }
         // the user waited for the full results, we know they're TestResult
         result = result as TestResult;
@@ -186,7 +189,7 @@ What are the results for 707XXXXXXXXXXXX`,
         result.tests = result.tests.filter((test) => test.outcome === ApexTestResultOutcome.Fail);
       }
 
-      return textResponse(`Test result: ${JSON.stringify(result)}`);
+      return textResponse(`${connectionHeader(connection)}\n\nTest result: ${JSON.stringify(result)}`);
     } catch (e) {
       return textResponse(`Failed to run Apex Tests: ${e instanceof Error ? e.message : 'Unknown error'}`, true);
     }

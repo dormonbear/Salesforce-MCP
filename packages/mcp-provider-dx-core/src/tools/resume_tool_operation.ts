@@ -22,8 +22,8 @@ import { MetadataApiDeploy } from '@salesforce/source-deploy-retrieve';
 import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { ensureString } from '@salesforce/ts-types';
-import { textResponse } from '../shared/utils.js';
-import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
+import { textResponse, connectionHeader, requireUsernameOrAlias } from '../shared/utils.js';
+import { usernameOrAliasParam } from '../shared/params.js';
 import { type ToolTextResponse } from '../shared/types.js';
 
 const resumableIdPrefixes = new Map<string, string>([
@@ -55,7 +55,7 @@ export const resumeParamsSchema = z.object({
     .default(30)
     .describe('The amount of time to wait for the operation to complete in minutes (optional)'),
   usernameOrAlias: usernameOrAliasParam,
-  directory: directoryParam,
+  directory: z.string().optional().describe('OPTIONAL — not required to resume a job operation.'),
 });
 
 type InputArgs = z.infer<typeof resumeParamsSchema>;
@@ -113,27 +113,42 @@ Report on my org snapshot`,
       return textResponse('The jobId parameter is not a valid Salesforce id.', true);
     }
 
-    if (!input.usernameOrAlias)
-      return textResponse(
-        'The usernameOrAlias parameter is required, if the user did not specify one use the #get_username tool',
-        true,
-      );
+    const orgService = this.services.getOrgService();
+    const allowedOrgs = (await orgService.getAllowedOrgs()).flatMap((o) => [
+      ...(o.aliases ?? []),
+      ...(o.username ? [o.username] : []),
+    ]);
+    let usernameOrAlias: string;
+    try {
+      usernameOrAlias = requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
+    } catch (e) {
+      return textResponse(e instanceof Error ? e.message : String(e), true);
+    }
+    const connection = await orgService.getConnection(usernameOrAlias);
 
-    process.chdir(input.directory);
-    const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
-
+    let result: ToolTextResponse;
     switch (input.jobId.substring(0, 3)) {
       case resumableIdPrefixes.get('deploy'):
-        return resumeDeployment(connection, input.jobId, input.wait);
+        result = await resumeDeployment(connection, input.jobId, input.wait);
+        break;
       case resumableIdPrefixes.get('scratchOrg'):
-        return resumeScratchOrg(input.jobId, input.wait);
+        result = await resumeScratchOrg(input.jobId, input.wait);
+        break;
       case resumableIdPrefixes.get('agentTest'):
-        return resumeAgentTest(connection, input.jobId, input.wait);
+        result = await resumeAgentTest(connection, input.jobId, input.wait);
+        break;
       case resumableIdPrefixes.get('orgSnapshot'):
-        return resumeOrgSnapshot(connection, input.jobId, input.wait);
+        result = await resumeOrgSnapshot(connection, input.jobId, input.wait);
+        break;
       default:
         return textResponse(`The job id: ${input.jobId} is not resumeable.`, true);
     }
+    // Prepend connection identity to every successful response
+    if (!result.isError) {
+      const text = (result.content[0] as { text: string }).text;
+      return textResponse(`${connectionHeader(connection)}\n\n${text}`, false);
+    }
+    return result;
   }
 }
 

@@ -23,7 +23,7 @@ import { Duration } from '@salesforce/kit';
 import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
-import { textResponse } from '../shared/utils.js';
+import { textResponse, connectionHeader, requireUsernameOrAlias } from '../shared/utils.js';
 
 /*
  * Deploy metadata to a Salesforce org.
@@ -136,16 +136,19 @@ Deploy X to my org and run A,B and C apex tests.`,
       return textResponse("You can't specify both `sourceDir` and `manifest` parameters.", true);
     }
 
-    if (!input.usernameOrAlias)
-      return textResponse(
-        'The usernameOrAlias parameter is required, if the user did not specify one use the #get_username tool',
-        true,
-      );
+    const orgService = this.services.getOrgService();
+    const allowedOrgs = (await orgService.getAllowedOrgs()).flatMap((o) => [
+      ...(o.aliases ?? []),
+      ...(o.username ? [o.username] : []),
+    ]);
+    let usernameOrAlias: string;
+    try {
+      usernameOrAlias = requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
+    } catch (e) {
+      return textResponse(e instanceof Error ? e.message : String(e), true);
+    }
 
-    // needed for org allowlist to work
-    process.chdir(input.directory);
-
-    const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
+    const connection = await orgService.getConnection(usernameOrAlias);
     const project = await SfProject.resolve(input.directory);
 
     const org = await Org.create({ connection });
@@ -190,7 +193,7 @@ Deploy X to my org and run A,B and C apex tests.`,
         timeout: Duration.minutes(10),
       });
 
-      return textResponse(`Deploy result: ${JSON.stringify(result.response)}`, !result.response.success);
+      return textResponse(`${connectionHeader(connection)}\n\nDeploy result: ${JSON.stringify(result.response)}`, !result.response.success);
     } catch (error) {
       const err = SfError.wrap(error);
       if (err.message.includes('timed out')) {

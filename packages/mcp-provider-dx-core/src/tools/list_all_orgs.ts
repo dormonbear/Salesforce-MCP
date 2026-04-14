@@ -18,7 +18,6 @@ import { z } from 'zod';
 import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { textResponse } from '../shared/utils.js';
-import { directoryParam } from '../shared/params.js';
 
 /*
  * List all Salesforce orgs
@@ -26,14 +25,14 @@ import { directoryParam } from '../shared/params.js';
  * Lists all configured Salesforce orgs.
  *
  * Parameters:
- * - directory: directory to change to before running the command
+ * - directory: OPTIONAL — not required for listing orgs
  *
  * Returns:
  * - textResponse: List of configured Salesforce orgs
  */
 
 export const listAllOrgsParamsSchema = z.object({
-  directory: directoryParam,
+  directory: z.string().optional().describe('OPTIONAL — not required for listing orgs.'),
 });
 
 type InputArgs = z.infer<typeof listAllOrgsParamsSchema>;
@@ -78,9 +77,8 @@ List all orgs`,
     };
   }
 
-  public async exec(input: InputArgs): Promise<CallToolResult> {
+  public async exec(_input: InputArgs): Promise<CallToolResult> {
     try {
-      process.chdir(input.directory);
       const orgs = await this.services.getOrgService().getAllowedOrgs();
       return textResponse(`List of configured Salesforce orgs:\n\n${JSON.stringify(orgs, null, 2)}`);
     } catch (error) {

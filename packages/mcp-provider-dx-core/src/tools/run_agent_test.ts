@@ -19,8 +19,8 @@ import { AgentTester } from '@salesforce/agents';
 import { Duration } from '@salesforce/kit';
 import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
-import { textResponse } from '../shared/utils.js';
+import { usernameOrAliasParam } from '../shared/params.js';
+import { textResponse, connectionHeader, requireUsernameOrAlias } from '../shared/utils.js';
 
 /*
  * Run Agent tests in a Salesforce org.
@@ -42,7 +42,7 @@ const runAgentTestsParam = z.object({
 `,
   ),
   usernameOrAlias: usernameOrAliasParam,
-  directory: directoryParam,
+  directory: z.string().optional().describe('OPTIONAL — not required for running Agent tests. AgentTester uses the org connection, not a local project.'),
   async: z
     .boolean()
     .default(false)
@@ -94,26 +94,30 @@ start myAgentTest and don't wait for results`,
   }
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
-    if (!input.usernameOrAlias)
-      return textResponse(
-        'The usernameOrAlias parameter is required, if the user did not specify one use the #get_username tool',
-        true,
-      );
+    const orgService = this.services.getOrgService();
+    const allowedOrgs = (await orgService.getAllowedOrgs()).flatMap((o) => [
+      ...(o.aliases ?? []),
+      ...(o.username ? [o.username] : []),
+    ]);
+    let usernameOrAlias: string;
+    try {
+      usernameOrAlias = requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
+    } catch (e) {
+      return textResponse(e instanceof Error ? e.message : String(e), true);
+    }
 
-    // needed for org allowlist to work
-    process.chdir(input.directory);
-    const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
+    const connection = await orgService.getConnection(usernameOrAlias);
 
     try {
       const agentTester = new AgentTester(connection);
 
       if (input.async) {
         const startResult = await agentTester.start(input.agentApiName);
-        return textResponse(`Test Run: ${JSON.stringify(startResult)}`);
+        return textResponse(`${connectionHeader(connection)}\n\nTest Run: ${JSON.stringify(startResult)}`);
       } else {
         const test = await agentTester.start(input.agentApiName);
         const result = await agentTester.poll(test.runId, { timeout: Duration.minutes(10) });
-        return textResponse(`Test result: ${JSON.stringify(result)}`);
+        return textResponse(`${connectionHeader(connection)}\n\nTest result: ${JSON.stringify(result)}`);
       }
     } catch (e) {
       return textResponse(`Failed to run Agent Tests: ${e instanceof Error ? e.message : 'Unknown error'}`, true);

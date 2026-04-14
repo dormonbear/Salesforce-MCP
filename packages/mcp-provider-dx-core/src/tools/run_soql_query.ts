@@ -17,8 +17,8 @@
 import { z } from 'zod';
 import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { textResponse, connectionHeader } from '../shared/utils.js';
-import { directoryParam, usernameOrAliasParam, useToolingApiParam } from '../shared/params.js';
+import { textResponse, connectionHeader, requireUsernameOrAlias } from '../shared/utils.js';
+import { usernameOrAliasParam, useToolingApiParam } from '../shared/params.js';
 
 /*
  * Query Salesforce org
@@ -36,7 +36,7 @@ import { directoryParam, usernameOrAliasParam, useToolingApiParam } from '../sha
 export const queryOrgParamsSchema = z.object({
   query: z.string().describe('SOQL query to run'),
   usernameOrAlias: usernameOrAliasParam,
-  directory: directoryParam,
+  directory: z.string().optional().describe('OPTIONAL — not required for SOQL queries. Omit unless you have a specific project directory context.'),
   useToolingApi: useToolingApiParam,
 });
 
@@ -76,18 +76,23 @@ export class QueryOrgMcpTool extends McpTool<InputArgsShape, OutputArgsShape> {
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
     try {
-      if (!input.usernameOrAlias)
-        return textResponse(
-          'The usernameOrAlias parameter is required, if the user did not specify one use the #get_username tool',
-          true,
-        );
-      process.chdir(input.directory);
-      const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
+      const orgService = this.services.getOrgService();
+      const allowedOrgs = (await orgService.getAllowedOrgs()).flatMap((o) => [
+        ...(o.aliases ?? []),
+        ...(o.username ? [o.username] : []),
+      ]);
+      let usernameOrAlias: string;
+      try {
+        usernameOrAlias = requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
+      } catch (e) {
+        return textResponse(e instanceof Error ? e.message : String(e), true);
+      }
+      const connection = await orgService.getConnection(usernameOrAlias);
       const result = input.useToolingApi
         ? await connection.tooling.query(input.query)
         : await connection.query(input.query);
 
-      return textResponse(`${connectionHeader(connection)}\n\nSOQL query results:\n\n${JSON.stringify(result, null, 2)}`);
+      return textResponse(`${connectionHeader(connection)}\n\nSOQL query results:\n\n${JSON.stringify(result, null, 2)}`, false);
     } catch (error) {
       let errorMessage = error instanceof Error ? error.message : 'Unknown error';
 

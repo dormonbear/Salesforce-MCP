@@ -22,7 +22,7 @@ import { Duration } from '@salesforce/kit';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
 import { ensureString } from '@salesforce/ts-types/lib/narrowing/ensure.js';
-import { textResponse } from '../shared/utils.js';
+import { textResponse, requireUsernameOrAlias } from '../shared/utils.js';
 import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
 
 /*
@@ -129,13 +129,28 @@ create a scratch org aliased as MyNewOrg and set as default and don't wait for i
   }
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
+    const orgService = this.services.getOrgService();
+    const allowedOrgs = (await orgService.getAllowedOrgs()).flatMap((o) => [
+      ...(o.aliases ?? []),
+      ...(o.username ? [o.username] : []),
+    ]);
+    let devHub: string;
+    try {
+      devHub = requireUsernameOrAlias(allowedOrgs, input.devHub);
+    } catch (e) {
+      return textResponse(e instanceof Error ? e.message : String(e), true);
+    }
+
+    // chdir-justified: scratchOrgCreate() resolves definitionFile relative to process.cwd();
+    // no API accepts explicit basePath for definitionFile resolution.
+    const originalCwd = process.cwd();
     try {
       process.chdir(input.directory);
 
       // NOTE: 
       // this should be:
       // ```ts
-      // const connection = await this.services.getOrgService().getConnection(input.devHub);
+      // const connection = await orgService.getConnection(devHub);
       // const hubOrProd = await Org.create({ connection });
       // ```
       //
@@ -146,13 +161,8 @@ create a scratch org aliased as MyNewOrg and set as default and don't wait for i
       //
       // it doesn't happen when creating asynchronously.
       // will be fixed in W-19828802
-      const allowedOrgs = await this.services.getOrgService().getAllowedOrgs()
-      if (!allowedOrgs.find(o => o.aliases?.includes(input.devHub) || o.username === input.devHub)) {
-        throw new Error(
-          'No org found with the provided devhub username/alias. Ask the user to specify one or check their MCP Server startup config.'
-        )}
 
-      const hubOrProd = await Org.create({ aliasOrUsername: input.devHub });
+      const hubOrProd = await Org.create({ aliasOrUsername: devHub });
 
       const requestParams: ScratchOrgCreateOptions = {
         hubOrg: hubOrProd,
@@ -184,6 +194,8 @@ create a scratch org aliased as MyNewOrg and set as default and don't wait for i
       return textResponse(`Successfully created scratch org, username: ${ensureString(result.username)}`);
     } catch (e) {
       return textResponse(`Failed to create org: ${e instanceof Error ? e.message : 'Unknown error'}`, true);
+    } finally {
+      process.chdir(originalCwd);
     }
   }
 }

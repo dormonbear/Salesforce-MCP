@@ -20,8 +20,8 @@ import { MetadataResolver } from '@salesforce/source-deploy-retrieve';
 import open from 'open';
 import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { textResponse } from '../shared/utils.js';
-import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
+import { textResponse, connectionHeader, requireUsernameOrAlias } from '../shared/utils.js';
+import { usernameOrAliasParam } from '../shared/params.js';
 
 const orgOpenParamsSchema = z.object({
   filePath: z
@@ -29,7 +29,7 @@ const orgOpenParamsSchema = z.object({
     .optional()
     .describe('File path of the metadata to open. This should be an existent file path in the project.'),
   usernameOrAlias: usernameOrAliasParam,
-  directory: directoryParam,
+  directory: z.string().optional().describe('OPTIONAL — not required to open an org in the browser.'),
 });
 
 type InputArgs = z.infer<typeof orgOpenParamsSchema>;
@@ -69,31 +69,40 @@ You can specify a metadata file you want to open.`,
   }
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
-    process.chdir(input.directory);
+    try {
+      const orgService = this.services.getOrgService();
+      const allowedOrgs = (await orgService.getAllowedOrgs()).flatMap((o) => [
+        ...(o.aliases ?? []),
+        ...(o.username ? [o.username] : []),
+      ]);
+      let usernameOrAlias: string;
+      try {
+        usernameOrAlias = requireUsernameOrAlias(allowedOrgs, input.usernameOrAlias);
+      } catch (e) {
+        return textResponse(e instanceof Error ? e.message : String(e), true);
+      }
+      const connection = await orgService.getConnection(usernameOrAlias);
+      const org = await Org.create({ connection });
 
-    const connection = await this.services.getOrgService().getConnection(input.usernameOrAlias);
+      if (input.filePath) {
+        const metadataResolver = new MetadataResolver();
+        const components = metadataResolver.getComponentsFromPath(input.filePath);
+        const typeName = components[0]?.type?.name;
+        const metadataBuilderUrl = await org.getMetadataUIURL(typeName, input.filePath);
+        await open(metadataBuilderUrl);
+        return textResponse(
+          `${connectionHeader(connection)}\n\n${
+            metadataBuilderUrl.includes('FlexiPageList')
+              ? "Opened the org in your browser. This metadata file doesn't have a builder UI, opened Lightning App Builder instead."
+              : 'Opened this metadata in your browser'
+          }`,
+        );
+      }
 
-    const org = await Org.create({
-      connection
-    })
-
-    if (input.filePath) {
-      const metadataResolver = new MetadataResolver();
-      const components = metadataResolver.getComponentsFromPath(input.filePath);
-      const typeName = components[0]?.type?.name;
-
-      const metadataBuilderUrl = await org.getMetadataUIURL(typeName, input.filePath);
-      await open(metadataBuilderUrl);
-
-      return textResponse(
-        metadataBuilderUrl.includes('FlexiPageList')
-          ? "Opened the org in your browser. This metadata file doesn't have a builder UI, opened Lightning App Builder instead."
-          : 'Opened this metadata in your browser',
-      );
+      await open(await org.getFrontDoorUrl());
+      return textResponse(`${connectionHeader(connection)}\n\nOpened the org in your browser.`);
+    } catch (error) {
+      return textResponse(`Failed to open org: ${error instanceof Error ? error.message : 'Unknown error'}`, true);
     }
-
-    await open(await org.getFrontDoorUrl());
-
-    return textResponse('Opened the org in your browser.');
   }
 }

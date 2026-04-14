@@ -18,8 +18,8 @@ import { z } from 'zod';
 import { Org } from '@salesforce/core';
 import { McpTool, McpToolConfig, ReleaseState, Services, Toolset } from '@salesforce/mcp-provider-api';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { textResponse } from '../shared/utils.js';
-import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
+import { textResponse, connectionHeader, requireUsernameOrAlias } from '../shared/utils.js';
+import { usernameOrAliasParam } from '../shared/params.js';
 
 /*
  * Create a new scratch org snapshot
@@ -35,7 +35,7 @@ import { directoryParam, usernameOrAliasParam } from '../shared/params.js';
  */
 
 const createOrgSnapshotParams = z.object({
-  directory: directoryParam,
+  directory: z.string().optional().describe('OPTIONAL — not required for creating org snapshots. Pure org API.'),
   devHub: usernameOrAliasParam.describe(
     'The default devhub username, use the #get_username tool to get the default devhub if unsure',
   ),
@@ -86,12 +86,25 @@ create a snapshot of my MyScratch in myDevHub`,
 
   public async exec(input: InputArgs): Promise<CallToolResult> {
     try {
-      process.chdir(input.directory);
+      const orgService = this.services.getOrgService();
+      const allowedOrgs = (await orgService.getAllowedOrgs()).flatMap((o) => [
+        ...(o.aliases ?? []),
+        ...(o.username ? [o.username] : []),
+      ]);
+      // Validate both devHub and sourceOrg against the allowed list
+      let sourceOrg: string;
+      let devHub: string;
+      try {
+        sourceOrg = requireUsernameOrAlias(allowedOrgs, input.sourceOrg);
+        devHub = requireUsernameOrAlias(allowedOrgs, input.devHub);
+      } catch (e) {
+        return textResponse(e instanceof Error ? e.message : String(e), true);
+      }
 
-      const connection = await this.services.getOrgService().getConnection(input.sourceOrg);
+      const connection = await orgService.getConnection(sourceOrg);
 
       const sourceOrgId = (await Org.create({ connection })).getOrgId();
-      const devHubConnection = await this.services.getOrgService().getConnection(input.devHub);
+      const devHubConnection = await orgService.getConnection(devHub);
       const createResponse = await devHubConnection.sobject('OrgSnapshot').create({
         SourceOrg: sourceOrgId,
         Description: input.description,
@@ -112,7 +125,7 @@ create a snapshot of my MyScratch in myDevHub`,
               ExpirationDate,
               Error FROM OrgSnapshot WHERE Id = '${createResponse.id}'`);
 
-      return textResponse(`Successfully created the org snapshot: ${JSON.stringify(result)}`);
+      return textResponse(`${connectionHeader(connection)}\n\nSuccessfully created the org snapshot: ${JSON.stringify(result)}`);
     } catch (error) {
       const e = error as Error;
       // dev hub does not have snapshot pref enabled
