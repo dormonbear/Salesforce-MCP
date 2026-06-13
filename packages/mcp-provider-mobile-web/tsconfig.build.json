@@ -18,7 +18,7 @@
   "include": ["./src"],
   "references": [
     {
-      "path": "../mcp-provider-api/tsconfig.json"
+      "path": "../mcp-provider-api/tsconfig.build.json"
     }
   ]
 }
