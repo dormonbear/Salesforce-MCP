@@ -24,7 +24,12 @@ dist
 coverage
 
 # generated docs
-docs
+docs/*
+# but keep hand-written superpowers project docs & plans
+!docs/superpowers/
+
+# codegraph local index
+.codegraph/
 
 
 npm-shrinkwrap.json
