@@ -4,7 +4,10 @@
   "license": "Apache-2.0",
   "workspaces": {
     "packages": [
-      "packages/*"
+      "packages/mcp",
+      "packages/mcp-provider-api",
+      "packages/mcp-provider-dx-core",
+      "packages/mcp-test-client"
     ],
     "nohoist": [
       "**"
