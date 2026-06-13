@@ -47,7 +47,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.18.0",
     "@oclif/core": "^4.5.1",
-    "@salesforce/agents": "^1.3.0",
+    "@salesforce/agents": "^0.25.1",
     "@salesforce/apex-node": "^8.2.1",
     "@salesforce/core": "^8.29.0",
     "@salesforce/kit": "^3.1.6",
@@ -62,6 +62,7 @@
     "@salesforce/mcp-provider-metadata-enrichment": "0.1.8",
     "@salesforce/source-deploy-retrieve": "^12.35.0",
     "@salesforce/source-tracking": "^7.8.14",
+    "@salesforce/telemetry": "^6.8.19",
     "@salesforce/ts-types": "^2.0.12",
     "zod": "^3.25.76"
   },
