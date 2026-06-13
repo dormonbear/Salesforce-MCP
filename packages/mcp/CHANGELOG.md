@@ -1,3 +1,39 @@
+## [0.30.13](https://github.com/salesforcecli/mcp/compare/0.30.12...0.30.13) (2026-05-27)
+
+
+
+## [0.30.12](https://github.com/salesforcecli/mcp/compare/0.30.11...0.30.12) (2026-05-21)
+
+
+
+## [0.30.11](https://github.com/salesforcecli/mcp/compare/0.30.10...0.30.11) (2026-05-21)
+
+
+
+## [0.30.10](https://github.com/salesforcecli/mcp/compare/0.30.9...0.30.10) (2026-05-21)
+
+
+
+## [0.30.9](https://github.com/salesforcecli/mcp/compare/0.30.8...0.30.9) (2026-05-07)
+
+
+
+## [0.30.8](https://github.com/salesforcecli/mcp/compare/0.30.7...0.30.8) (2026-04-30)
+
+
+
+## [0.30.7](https://github.com/salesforcecli/mcp/compare/0.30.6...0.30.7) (2026-04-23)
+
+
+
+## [0.30.6](https://github.com/salesforcecli/mcp/compare/0.30.5...0.30.6) (2026-04-23)
+
+
+
+## [0.30.5](https://github.com/salesforcecli/mcp/compare/0.30.4...0.30.5) (2026-04-03)
+
+
+
 ## [0.30.4](https://github.com/salesforcecli/mcp/compare/0.30.3...0.30.4) (2026-04-02)
 
 

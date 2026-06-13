@@ -17,7 +17,7 @@
   "types": "dist/index.d.ts",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.18.0",
-    "@salesforce/core": "^8.24.3",
+    "@salesforce/core": "^8.29.0",
     "@salesforce/ts-types": "^2",
     "@types/chai": "^5.2.3",
     "@types/deep-eql": "^4.0.2",
