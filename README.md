@@ -20,7 +20,6 @@ Enhanced MCP Server for Interacting with Salesforce Orgs
 - **Relationship Graph** — Automatically extracts object relationships from `describe` results, surfaces related objects in SOQL query responses
 - **Query History** — Ring buffer stores recent successful SOQL queries per org; AI agents can list and reuse past queries via `salesforce_list_query_history`
 - **Describe Object Tool** — New `salesforce_describe_object` tool returns full object schema with fields, relationships, and child relationships
-- **No Telemetry** — All Salesforce telemetry removed
 
 ## Feedback
 

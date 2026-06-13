@@ -37,7 +37,6 @@ adds AI-agent ergonomics the upstream lacks.
   successful SOQL; `INVALID_FIELD` recovery with Levenshtein fuzzy suggestions;
   relationship-graph extraction surfaced in query responses; query history ring
   buffer (`salesforce_list_query_history`); new `salesforce_describe_object` tool.
-- **No telemetry** — all Salesforce telemetry removed.
 
 ## Architecture
 
