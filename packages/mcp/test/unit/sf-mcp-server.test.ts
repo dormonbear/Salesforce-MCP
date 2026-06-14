@@ -53,13 +53,12 @@ describe('SfMcpServer middleware', () => {
       {
         orgPermissions,
         authorizedOrgs: ['prod', 'staging', 'readonly-org'],
-        defaultOrg: 'staging',
       }
     );
   });
 
-  describe('schema injection', () => {
-    it('should add targetOrg to inputSchema', () => {
+  describe('schema (no injection)', () => {
+    it('should NOT add a targetOrg param to inputSchema', () => {
       let capturedConfig: any;
       const originalProto = Object.getPrototypeOf(Object.getPrototypeOf(server));
       const stub = sinon.stub(originalProto, 'registerTool').callsFake(
@@ -74,17 +73,18 @@ describe('SfMcpServer middleware', () => {
       }));
       stub.restore();
 
-      expect(capturedConfig.inputSchema).to.have.property('targetOrg');
+      expect(capturedConfig.inputSchema).to.not.have.property('targetOrg');
+      expect(capturedConfig.inputSchema).to.have.property('query');
     });
   });
 
-  describe('permission enforcement', () => {
+  describe('permission enforcement (keyed on explicit usernameOrAlias)', () => {
     it('should deny write tool on read-only org', async () => {
       const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'ok' }] });
       const wrappedCb = captureWrappedCallback(server, 'salesforce_dml_records',
-        { operation: z.string(), objectName: z.string(), records: z.array(z.any()) }, cb);
+        { operation: z.string(), objectName: z.string(), records: z.array(z.any()), usernameOrAlias: z.string() }, cb);
 
-      const result = await wrappedCb({ targetOrg: 'readonly-org', operation: 'update', objectName: 'Account', records: [] }, {});
+      const result = await wrappedCb({ usernameOrAlias: 'readonly-org', operation: 'update', objectName: 'Account', records: [] }, {});
       expect(result.isError).to.be.true;
       expect(result.content[0].text).to.include('read-only');
       expect(cb.called).to.be.false;
@@ -93,9 +93,9 @@ describe('SfMcpServer middleware', () => {
     it('should allow read tool on read-only org', async () => {
       const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'query result' }] });
       const wrappedCb = captureWrappedCallback(server, 'salesforce_query_records',
-        { query: z.string() }, cb);
+        { query: z.string(), usernameOrAlias: z.string() }, cb);
 
-      const result = await wrappedCb({ targetOrg: 'readonly-org', query: 'SELECT Id FROM Account' }, {});
+      const result = await wrappedCb({ usernameOrAlias: 'readonly-org', query: 'SELECT Id FROM Account' }, {});
       expect(result.isError).to.be.undefined;
       expect(cb.calledOnce).to.be.true;
     });
@@ -103,81 +103,58 @@ describe('SfMcpServer middleware', () => {
     it('should allow write tool on full-access org without approval', async () => {
       const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'ok' }] });
       const wrappedCb = captureWrappedCallback(server, 'salesforce_dml_records',
-        { operation: z.string(), objectName: z.string(), records: z.array(z.any()) }, cb);
+        { operation: z.string(), objectName: z.string(), records: z.array(z.any()), usernameOrAlias: z.string() }, cb);
 
-      const result = await wrappedCb({ targetOrg: 'staging', operation: 'update', objectName: 'Account', records: [] }, {});
+      const result = await wrappedCb({ usernameOrAlias: 'staging', operation: 'update', objectName: 'Account', records: [] }, {});
       expect(result.isError).to.be.undefined;
       expect(cb.calledOnce).to.be.true;
     });
 
-    it('should use default org when targetOrg is not provided', async () => {
-      const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'ok' }] });
-      const wrappedCb = captureWrappedCallback(server, 'salesforce_query_records',
-        { query: z.string() }, cb);
-
-      await wrappedCb({ query: 'SELECT Id FROM Account' }, {});
-      const callArgs = cb.firstCall.args[0];
-      expect(callArgs.usernameOrAlias).to.equal('staging');
-    });
-
-    it('BUG REGRESSION (wrong-org bleed): must respect explicit usernameOrAlias, not overwrite with defaultOrg', async () => {
-      // The dx-core tools document `usernameOrAlias`. When the AI passes it WITHOUT the
-      // injected `targetOrg`, the middleware must route to that org — not silently to defaultOrg.
+    it('BUG REGRESSION (wrong-org bleed): explicit usernameOrAlias must reach the tool unchanged, never re-routed', async () => {
+      // Multi-org instance. The AI explicitly targets 'readonly-org'. The middleware must NOT
+      // inject or default anything — args.usernameOrAlias must arrive at the tool as 'readonly-org'.
       const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'ok' }] });
       const wrappedCb = captureWrappedCallback(server, 'salesforce_query_records',
         { query: z.string(), usernameOrAlias: z.string() }, cb);
 
-      // defaultOrg is 'staging'; AI explicitly asks for 'readonly-org' via usernameOrAlias, no targetOrg.
       await wrappedCb({ usernameOrAlias: 'readonly-org', query: 'SELECT Id FROM Account' }, {});
       const callArgs = cb.firstCall.args[0];
       expect(callArgs.usernameOrAlias).to.equal('readonly-org');
     });
 
-    it('should error when targetOrg and usernameOrAlias conflict (avoid silently discarding one)', async () => {
+    it('should reject usernameOrAlias not in authorized list', async () => {
       const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'ok' }] });
       const wrappedCb = captureWrappedCallback(server, 'salesforce_query_records',
         { query: z.string(), usernameOrAlias: z.string() }, cb);
 
-      const result = await wrappedCb({ targetOrg: 'prod', usernameOrAlias: 'staging', query: 'SELECT Id FROM Account' }, {});
-      expect(result.isError).to.be.true;
-      expect(result.content[0].text).to.match(/conflict/i);
-      expect(cb.called).to.be.false;
-    });
-
-    it('should reject targetOrg not in authorized list', async () => {
-      const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'ok' }] });
-      const wrappedCb = captureWrappedCallback(server, 'salesforce_query_records',
-        { query: z.string() }, cb);
-
-      const result = await wrappedCb({ targetOrg: 'unknown-org', query: 'SELECT Id FROM Account' }, {});
+      const result = await wrappedCb({ usernameOrAlias: 'unknown-org', query: 'SELECT Id FROM Account' }, {});
       expect(result.isError).to.be.true;
       expect(result.content[0].text).to.include('not authorized');
       expect(cb.called).to.be.false;
     });
 
-    it('should map targetOrg to usernameOrAlias in args', async () => {
+    it('should NOT inject or default an org when usernameOrAlias is absent (tool enforces its own requirement)', async () => {
+      // Middleware does nothing org-related when no org is provided; it passes through to the
+      // tool, whose own requireUsernameOrAlias (real tools) fails loudly. With a stub cb here,
+      // it simply executes — and crucially does NOT silently route to any default org.
       const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'ok' }] });
       const wrappedCb = captureWrappedCallback(server, 'salesforce_query_records',
-        { query: z.string() }, cb);
-
-      await wrappedCb({ targetOrg: 'prod', query: 'SELECT Id FROM Account' }, {});
-      const callArgs = cb.firstCall.args[0];
-      expect(callArgs.usernameOrAlias).to.equal('prod');
-      expect(callArgs).to.not.have.property('targetOrg');
-    });
-
-    it('should error when no target org and no default', async () => {
-      const serverNoDefault = new SfMcpServer(
-        { name: 'test', version: '1.0.0' },
-        { orgPermissions: new Map(), authorizedOrgs: [], defaultOrg: undefined }
-      );
-      const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'ok' }] });
-      const wrappedCb = captureWrappedCallback(serverNoDefault, 'salesforce_query_records',
-        { query: z.string() }, cb);
+        { query: z.string(), usernameOrAlias: z.string() }, cb);
 
       const result = await wrappedCb({ query: 'SELECT Id FROM Account' }, {});
-      expect(result.isError).to.be.true;
-      expect(result.content[0].text).to.include('No target org');
+      expect(result.isError).to.be.undefined;
+      expect(cb.calledOnce).to.be.true;
+      const callArgs = cb.firstCall.args[0];
+      expect(callArgs.usernameOrAlias).to.be.undefined;
+    });
+
+    it('should let org-less tools run with no org (e.g. list_all_orgs)', async () => {
+      const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'orgs' }] });
+      const wrappedCb = captureWrappedCallback(server, 'list_all_orgs', {}, cb);
+
+      const result = await wrappedCb({}, {});
+      expect(result.isError).to.be.undefined;
+      expect(cb.calledOnce).to.be.true;
     });
   });
 
@@ -185,27 +162,41 @@ describe('SfMcpServer middleware', () => {
     it('should fall through to error when elicitation not supported', async () => {
       const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'ok' }] });
       const wrappedCb = captureWrappedCallback(server, 'salesforce_dml_records',
-        { operation: z.string(), objectName: z.string(), records: z.array(z.any()) }, cb);
+        { operation: z.string(), objectName: z.string(), records: z.array(z.any()), usernameOrAlias: z.string() }, cb);
 
       // No elicitation support on mock server, so try/catch should trigger
-      const result = await wrappedCb({ targetOrg: 'prod', operation: 'update', objectName: 'Account', records: [] }, {});
+      const result = await wrappedCb({ usernameOrAlias: 'prod', operation: 'update', objectName: 'Account', records: [] }, {});
       expect(result.isError).to.be.true;
       expect(result.content[0].text).to.include('Elicitation');
       expect(cb.called).to.be.false;
     });
   });
 
-  describe('backward compatibility', () => {
-    it('should work with empty authorizedOrgs (skip validation)', async () => {
+  describe('open mode (empty authorizedOrgs skips the allowlist gate)', () => {
+    it('should allow any provided org when authorizedOrgs is empty', async () => {
       const serverOpen = new SfMcpServer(
         { name: 'test', version: '1.0.0' },
-        { orgPermissions: new Map(), authorizedOrgs: [], defaultOrg: 'my-org' }
+        { orgPermissions: new Map(), authorizedOrgs: [] }
       );
       const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'ok' }] });
       const wrappedCb = captureWrappedCallback(serverOpen, 'salesforce_query_records',
-        { query: z.string() }, cb);
+        { query: z.string(), usernameOrAlias: z.string() }, cb);
 
-      const result = await wrappedCb({ query: 'SELECT Id FROM Account' }, {});
+      const result = await wrappedCb({ usernameOrAlias: 'any-org', query: 'SELECT Id FROM Account' }, {});
+      expect(result.isError).to.be.undefined;
+      expect(cb.calledOnce).to.be.true;
+    });
+
+    it('should allow ALLOW_ALL_ORGS to bypass the allowlist gate', async () => {
+      const serverAll = new SfMcpServer(
+        { name: 'test', version: '1.0.0' },
+        { orgPermissions: new Map(), authorizedOrgs: ['ALLOW_ALL_ORGS'] }
+      );
+      const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'ok' }] });
+      const wrappedCb = captureWrappedCallback(serverAll, 'salesforce_query_records',
+        { query: z.string(), usernameOrAlias: z.string() }, cb);
+
+      const result = await wrappedCb({ usernameOrAlias: 'whatever-org', query: 'SELECT Id FROM Account' }, {});
       expect(result.isError).to.be.undefined;
       expect(cb.calledOnce).to.be.true;
     });
@@ -226,13 +217,13 @@ describe('SfMcpServer middleware', () => {
       const wrappedCb = captureWrappedCallback(
         server,
         'salesforce_query_records',
-        { query: z.string() },
+        { query: z.string(), usernameOrAlias: z.string() },
         cb,
       );
 
       await Promise.all([
-        wrappedCb({ targetOrg: 'staging', query: 'q1' }, {}),
-        wrappedCb({ targetOrg: 'staging', query: 'q2' }, {}),
+        wrappedCb({ usernameOrAlias: 'staging', query: 'q1' }, {}),
+        wrappedCb({ usernameOrAlias: 'staging', query: 'q2' }, {}),
       ]);
 
       expect(executionOrder).to.have.lengthOf(4);
@@ -255,19 +246,19 @@ describe('SfMcpServer middleware', () => {
       const wrappedCb = captureWrappedCallback(
         server,
         'serialized_tool',
-        { query: z.string() },
+        { query: z.string(), usernameOrAlias: z.string() },
         cb,
       );
 
       await Promise.all([
-        wrappedCb({ targetOrg: 'staging', query: 'q1' }, {}),
-        wrappedCb({ targetOrg: 'staging', query: 'q2' }, {}),
+        wrappedCb({ usernameOrAlias: 'staging', query: 'q1' }, {}),
+        wrappedCb({ usernameOrAlias: 'staging', query: 'q2' }, {}),
       ]);
 
       expect(executionOrder).to.deep.equal(['start-q1', 'end-q1', 'start-q2', 'end-q2']);
     });
 
-    it('should preserve correct args for each concurrent call', async () => {
+    it('should preserve correct org for each concurrent call', async () => {
       const capturedArgs: string[] = [];
 
       const cb = async (args: Record<string, unknown>) => {
@@ -279,13 +270,13 @@ describe('SfMcpServer middleware', () => {
       const wrappedCb = captureWrappedCallback(
         server,
         'salesforce_query_records',
-        { query: z.string() },
+        { query: z.string(), usernameOrAlias: z.string() },
         cb,
       );
 
       await Promise.all([
-        wrappedCb({ targetOrg: 'staging', query: 'q1' }, {}),
-        wrappedCb({ targetOrg: 'prod', query: 'q2' }, {}),
+        wrappedCb({ usernameOrAlias: 'staging', query: 'q1' }, {}),
+        wrappedCb({ usernameOrAlias: 'prod', query: 'q2' }, {}),
       ]);
 
       expect(capturedArgs).to.include('staging');
@@ -297,7 +288,7 @@ describe('SfMcpServer middleware', () => {
 
       const cb = async (args: Record<string, unknown>) => {
         const id = args.query as string;
-        await new Promise((resolve) => setTimeout(resolve, Math.random() * 30));
+        await new Promise((resolve) => setTimeout(resolve, 5));
         results.push(id);
         return { content: [{ type: 'text' as const, text: `result-${id}` }] };
       };
@@ -305,13 +296,13 @@ describe('SfMcpServer middleware', () => {
       const wrappedCb = captureWrappedCallback(
         server,
         'salesforce_query_records',
-        { query: z.string() },
+        { query: z.string(), usernameOrAlias: z.string() },
         cb,
       );
 
       const responses = await Promise.all(
         ['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7'].map((q) =>
-          wrappedCb({ targetOrg: 'staging', query: q }, {})
+          wrappedCb({ usernameOrAlias: 'staging', query: q }, {})
         )
       );
 
@@ -332,9 +323,9 @@ describe('SfMcpServer middleware', () => {
       });
 
       const wrappedCb = captureWrappedCallback(server, 'test_structured_tool',
-        { query: z.string() }, cb);
+        { query: z.string(), usernameOrAlias: z.string() }, cb);
 
-      const result = await wrappedCb({ targetOrg: 'staging', query: 'test' }, {});
+      const result = await wrappedCb({ usernameOrAlias: 'staging', query: 'test' }, {});
 
       expect(result.structuredContent).to.deep.equal(structuredData);
       expect(result.content).to.deep.equal([{ type: 'text', text: JSON.stringify(structuredData) }]);
@@ -347,9 +338,9 @@ describe('SfMcpServer middleware', () => {
       });
 
       const wrappedCb = captureWrappedCallback(server, 'test_error_tool',
-        { query: z.string() }, cb);
+        { query: z.string(), usernameOrAlias: z.string() }, cb);
 
-      const result = await wrappedCb({ targetOrg: 'staging', query: 'test' }, {});
+      const result = await wrappedCb({ usernameOrAlias: 'staging', query: 'test' }, {});
 
       expect(result.isError).to.be.true;
       expect(result).to.not.have.property('structuredContent');
