@@ -148,6 +148,19 @@ describe('SfMcpServer middleware', () => {
       expect(callArgs.usernameOrAlias).to.be.undefined;
     });
 
+    it('should not turn an empty-string usernameOrAlias into a real org (no default substitution)', async () => {
+      // Empty string is falsy, so the gate is skipped — but it must never be replaced by a
+      // default/real org. The empty value passes through untouched; the tool's own
+      // requireUsernameOrAlias rejects it downstream.
+      const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'ok' }] });
+      const wrappedCb = captureWrappedCallback(server, 'salesforce_query_records',
+        { query: z.string(), usernameOrAlias: z.string() }, cb);
+
+      await wrappedCb({ usernameOrAlias: '', query: 'SELECT Id FROM Account' }, {});
+      const callArgs = cb.firstCall.args[0];
+      expect(callArgs.usernameOrAlias).to.equal('');
+    });
+
     it('should let org-less tools run with no org (e.g. list_all_orgs)', async () => {
       const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'orgs' }] });
       const wrappedCb = captureWrappedCallback(server, 'list_all_orgs', {}, cb);
