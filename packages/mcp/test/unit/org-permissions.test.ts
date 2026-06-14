@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import {
   parseOrgPermissions,
+  expandOrgPermissions,
   getOrgPermission,
   canExecute,
   type OrgPermission,
@@ -97,6 +98,38 @@ describe('org-permissions', () => {
 
     it('should allow write on unconfigured org (defaults to full-access)', () => {
       expect(canExecute(permissions, 'unknown-org', 'write')).to.equal('allow');
+    });
+  });
+
+  describe('expandOrgPermissions (alias/username normalization)', () => {
+    it('applies an alias-configured permission to the resolved username and every alias', () => {
+      // SECURITY REGRESSION: ORG_PERMISSIONS is configured by alias, but the AI may pass the
+      // resolved username (get_username output tells it to). Without expansion the username
+      // misses the map and defaults to full-access, bypassing the read-only protection.
+      const perms = parseOrgPermissions('V_Staging:read-only');
+      const expanded = expandOrgPermissions(perms, [
+        { username: 'admin@example.com.full', aliases: ['V_Staging', 'staging'] },
+      ]);
+      expect(getOrgPermission(expanded, 'admin@example.com.full')).to.equal('read-only');
+      expect(getOrgPermission(expanded, 'staging')).to.equal('read-only');
+      expect(getOrgPermission(expanded, 'V_Staging')).to.equal('read-only');
+      expect(canExecute(expanded, 'admin@example.com.full', 'write')).to.equal('deny');
+    });
+
+    it('leaves orgs without a configured permission at the full-access default', () => {
+      const perms = parseOrgPermissions('V_Prod:read-only');
+      const expanded = expandOrgPermissions(perms, [
+        { username: 'admin@example.com', aliases: ['V_Prod'] },
+        { username: 'dev@example.com', aliases: ['V_Dev'] },
+      ]);
+      expect(getOrgPermission(expanded, 'V_Dev')).to.equal('full-access');
+      expect(getOrgPermission(expanded, 'dev@example.com')).to.equal('full-access');
+    });
+
+    it('handles a permission configured by username (expands to its aliases)', () => {
+      const perms = parseOrgPermissions('admin@example.com:approval-required');
+      const expanded = expandOrgPermissions(perms, [{ username: 'admin@example.com', aliases: ['V_Prod'] }]);
+      expect(getOrgPermission(expanded, 'V_Prod')).to.equal('approval-required');
     });
   });
 });

@@ -20,13 +20,13 @@ import { TOOLSETS } from '@dormon/mcp-provider-api';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { Command, Flags, ux } from '@oclif/core';
 import Cache from './utils/cache.js';
-import { resolveSymbolicOrgs } from './utils/auth.js';
+import { resolveSymbolicOrgs, getAllAllowedOrgs } from './utils/auth.js';
 import { Telemetry } from './telemetry.js';
 import { SfMcpServer } from './sf-mcp-server.js';
 import { registerToolsets, registerResourcesFromProviders } from './utils/registry-utils.js';
 import { MCP_PROVIDER_REGISTRY } from './registry.js';
 import { Services } from './services.js';
-import { parseOrgPermissions } from './utils/org-permissions.js';
+import { parseOrgPermissions, expandOrgPermissions } from './utils/org-permissions.js';
 
 
 export default class McpServerCommand extends Command {
@@ -137,10 +137,18 @@ You can also use special values to control access to orgs:
     const resolvedOrgList = [...resolvedOrgs];
 
     this.logToStderr(`Allowed orgs:\n${resolvedOrgList.map((org) => `- ${org}`).join('\n')}`);
-    const orgPermissions = parseOrgPermissions(process.env.ORG_PERMISSIONS);
-    if (orgPermissions.size > 0) {
-      this.logToStderr(`Org permissions:\n${[...orgPermissions.entries()].map(([org, perm]) => `- ${org}: ${perm}`).join('\n')}`);
+    const configuredOrgPermissions = parseOrgPermissions(process.env.ORG_PERMISSIONS);
+    if (configuredOrgPermissions.size > 0) {
+      this.logToStderr(
+        `Org permissions:\n${[...configuredOrgPermissions.entries()].map(([org, perm]) => `- ${org}: ${perm}`).join('\n')}`
+      );
     }
+    // Expand permissions across each org's identifiers (username + aliases) so a permission
+    // configured by alias cannot be bypassed by passing the resolved username (or vice versa).
+    const orgPermissions =
+      configuredOrgPermissions.size > 0
+        ? expandOrgPermissions(configuredOrgPermissions, await getAllAllowedOrgs())
+        : configuredOrgPermissions;
     const server = new SfMcpServer(
       {
         name: 'sf-mcp-server-enhanced',

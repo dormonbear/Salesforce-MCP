@@ -133,6 +133,17 @@ describe('SfMcpServer middleware', () => {
       expect(callArgs.usernameOrAlias).to.equal('readonly-org');
     });
 
+    it('should error when targetOrg and usernameOrAlias conflict (avoid silently discarding one)', async () => {
+      const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'ok' }] });
+      const wrappedCb = captureWrappedCallback(server, 'salesforce_query_records',
+        { query: z.string(), usernameOrAlias: z.string() }, cb);
+
+      const result = await wrappedCb({ targetOrg: 'prod', usernameOrAlias: 'staging', query: 'SELECT Id FROM Account' }, {});
+      expect(result.isError).to.be.true;
+      expect(result.content[0].text).to.match(/conflict/i);
+      expect(cb.called).to.be.false;
+    });
+
     it('should reject targetOrg not in authorized list', async () => {
       const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'ok' }] });
       const wrappedCb = captureWrappedCallback(server, 'salesforce_query_records',

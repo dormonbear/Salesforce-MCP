@@ -23,6 +23,29 @@ export function parseOrgPermissions(envValue: string | undefined): Map<string, O
   return permissions;
 }
 
+/**
+ * Expand a permission map so a permission configured for ANY identifier of an org (an alias
+ * or the username) applies to ALL of that org's identifiers.
+ *
+ * Without this, ORG_PERMISSIONS configured by alias (e.g. `V_Staging:read-only`) is bypassed
+ * when a caller passes the resolved username instead — getOrgPermission misses the map and
+ * defaults to full-access, silently dropping the read-only/approval protection.
+ */
+export function expandOrgPermissions(
+  permissions: Map<string, OrgPermission>,
+  orgIdentities: ReadonlyArray<{ username?: string; aliases?: string[] | null }>
+): Map<string, OrgPermission> {
+  const expanded = new Map(permissions);
+  for (const org of orgIdentities) {
+    const ids = [org.username, ...(org.aliases ?? [])].filter((id): id is string => Boolean(id));
+    const configured = ids.map((id) => permissions.get(id)).find((p) => p !== undefined);
+    if (configured) {
+      for (const id of ids) expanded.set(id, configured);
+    }
+  }
+  return expanded;
+}
+
 export function getOrgPermission(permissions: Map<string, OrgPermission>, alias: string): OrgPermission {
   return permissions.get(alias) ?? 'full-access';
 }

@@ -150,8 +150,22 @@ export class SfMcpServer extends McpServer implements ToolMethodSignatures {
       // Org precedence: explicit targetOrg, then the tool's own usernameOrAlias, then the
       // configured default. NEVER overwrite an explicitly-provided org — doing so silently
       // routed queries to defaultOrg (resolvedOrgList[0]) and caused wrong-org bleed.
-      const targetOrg =
-        (args.targetOrg as string | undefined) ?? (args.usernameOrAlias as string | undefined) ?? this.defaultOrg;
+      const explicitTargetOrg = args.targetOrg as string | undefined;
+      const explicitUsernameOrAlias = args.usernameOrAlias as string | undefined;
+      // If both are given but disagree, fail loudly rather than silently picking one — a
+      // silently-discarded org is exactly the wrong-org bleed this routing guards against.
+      if (explicitTargetOrg && explicitUsernameOrAlias && explicitTargetOrg !== explicitUsernameOrAlias) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: `Conflicting org parameters: targetOrg="${explicitTargetOrg}" and usernameOrAlias="${explicitUsernameOrAlias}" disagree. Pass only one.`,
+            },
+          ],
+        };
+      }
+      const targetOrg = explicitTargetOrg ?? explicitUsernameOrAlias ?? this.defaultOrg;
       delete args.targetOrg;
 
       if (!targetOrg) {
