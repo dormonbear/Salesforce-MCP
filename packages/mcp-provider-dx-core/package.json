@@ -1,6 +1,6 @@
 {
   "name": "@dormon/mcp-provider-dx-core",
-  "version": "0.0.7",
+  "version": "0.0.9",
   "description": "Enhanced MCP provider for core Salesforce DX functionality",
   "types": "lib/index.d.ts",
   "license": "Apache-2.0",
@@ -45,7 +45,7 @@
     "@salesforce/apex-node": "^8.4.22",
     "@salesforce/core": "^8.29.0",
     "@salesforce/kit": "^3.2.6",
-    "@dormon/mcp-provider-api": "0.0.7",
+    "@dormon/mcp-provider-api": "0.0.9",
     "@salesforce/source-deploy-retrieve": "^12.35.0",
     "@salesforce/source-tracking": "^7.8.14",
     "@salesforce/ts-types": "^2.0.12",
