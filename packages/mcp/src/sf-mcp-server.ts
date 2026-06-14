@@ -147,7 +147,11 @@ export class SfMcpServer extends McpServer implements ToolMethodSignatures {
       this.logger.debug(`Tool ${name} called`);
 
       // --- Permission middleware (runs before rate limiting) ---
-      const targetOrg = (args.targetOrg as string | undefined) ?? this.defaultOrg;
+      // Org precedence: explicit targetOrg, then the tool's own usernameOrAlias, then the
+      // configured default. NEVER overwrite an explicitly-provided org — doing so silently
+      // routed queries to defaultOrg (resolvedOrgList[0]) and caused wrong-org bleed.
+      const targetOrg =
+        (args.targetOrg as string | undefined) ?? (args.usernameOrAlias as string | undefined) ?? this.defaultOrg;
       delete args.targetOrg;
 
       if (!targetOrg) {
@@ -157,7 +161,11 @@ export class SfMcpServer extends McpServer implements ToolMethodSignatures {
         };
       }
 
-      if (this.authorizedOrgs.size > 0 && !this.authorizedOrgs.has(targetOrg)) {
+      if (
+        this.authorizedOrgs.size > 0 &&
+        !this.authorizedOrgs.has('ALLOW_ALL_ORGS') &&
+        !this.authorizedOrgs.has(targetOrg)
+      ) {
         return {
           isError: true,
           content: [{ type: 'text', text: `Org "${targetOrg}" is not authorized. Only configured orgs are allowed.` }],

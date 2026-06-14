@@ -120,6 +120,19 @@ describe('SfMcpServer middleware', () => {
       expect(callArgs.usernameOrAlias).to.equal('staging');
     });
 
+    it('BUG REGRESSION (wrong-org bleed): must respect explicit usernameOrAlias, not overwrite with defaultOrg', async () => {
+      // The dx-core tools document `usernameOrAlias`. When the AI passes it WITHOUT the
+      // injected `targetOrg`, the middleware must route to that org — not silently to defaultOrg.
+      const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'ok' }] });
+      const wrappedCb = captureWrappedCallback(server, 'salesforce_query_records',
+        { query: z.string(), usernameOrAlias: z.string() }, cb);
+
+      // defaultOrg is 'staging'; AI explicitly asks for 'readonly-org' via usernameOrAlias, no targetOrg.
+      await wrappedCb({ usernameOrAlias: 'readonly-org', query: 'SELECT Id FROM Account' }, {});
+      const callArgs = cb.firstCall.args[0];
+      expect(callArgs.usernameOrAlias).to.equal('readonly-org');
+    });
+
     it('should reject targetOrg not in authorized list', async () => {
       const cb = sinon.stub().resolves({ content: [{ type: 'text', text: 'ok' }] });
       const wrappedCb = captureWrappedCallback(server, 'salesforce_query_records',

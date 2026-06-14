@@ -154,7 +154,11 @@ You can also use special values to control access to orgs:
         telemetry: this.telemetry,
         orgPermissions,
         authorizedOrgs: resolvedOrgList,
-        defaultOrg: resolvedOrgList[0],
+        // Only provide a silent default when exactly ONE concrete org is configured.
+        // Under multi-org (or ALLOW_ALL_ORGS) there is no safe default — the caller must
+        // specify the org explicitly, otherwise a query could silently hit the wrong org.
+        defaultOrg:
+          resolvedOrgList.length === 1 && resolvedOrgList[0] !== 'ALLOW_ALL_ORGS' ? resolvedOrgList[0] : undefined,
       }
     );
 
