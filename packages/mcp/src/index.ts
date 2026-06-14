@@ -162,11 +162,6 @@ You can also use special values to control access to orgs:
         telemetry: this.telemetry,
         orgPermissions,
         authorizedOrgs: resolvedOrgList,
-        // defaultOrg is only used by the middleware as a last resort when NEITHER targetOrg
-        // NOR usernameOrAlias is provided. Org-touching tools require usernameOrAlias (schema),
-        // so they never fall back here; org-less tools (list_all_orgs, get_username) ignore it.
-        // Keeping the first org keeps those discovery tools working under multi-org.
-        defaultOrg: resolvedOrgList[0],
       }
     );
 
