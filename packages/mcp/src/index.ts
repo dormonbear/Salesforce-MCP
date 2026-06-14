@@ -154,11 +154,11 @@ You can also use special values to control access to orgs:
         telemetry: this.telemetry,
         orgPermissions,
         authorizedOrgs: resolvedOrgList,
-        // Only provide a silent default when exactly ONE concrete org is configured.
-        // Under multi-org (or ALLOW_ALL_ORGS) there is no safe default — the caller must
-        // specify the org explicitly, otherwise a query could silently hit the wrong org.
-        defaultOrg:
-          resolvedOrgList.length === 1 && resolvedOrgList[0] !== 'ALLOW_ALL_ORGS' ? resolvedOrgList[0] : undefined,
+        // defaultOrg is only used by the middleware as a last resort when NEITHER targetOrg
+        // NOR usernameOrAlias is provided. Org-touching tools require usernameOrAlias (schema),
+        // so they never fall back here; org-less tools (list_all_orgs, get_username) ignore it.
+        // Keeping the first org keeps those discovery tools working under multi-org.
+        defaultOrg: resolvedOrgList[0],
       }
     );
 
