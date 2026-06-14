@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write # OIDC token for npm trusted publishing
     steps:
       - uses: actions/checkout@v4
 
@@ -25,8 +26,9 @@ jobs:
           node-version: "lts/*"
           cache: yarn
 
-      - name: Configure npm auth
-        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+      # Trusted publishing (OIDC) needs npm >= 11.5.1; Node LTS ships an older npm.
+      - name: Update npm
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile || yarn install
@@ -64,14 +66,16 @@ jobs:
           cd packages/mcp-provider-dx-core && npx tsc -p tsconfig.publish.json && cd ../..
           cd packages/mcp && npx tsc -p tsconfig.publish.json && cd ../..
 
+      # No `|| echo skipping`: a real publish failure (auth, OIDC, conflict) must fail the job
+      # instead of masquerading as success. --provenance is auto under OIDC but set explicitly.
       - name: Publish @dormon/mcp-provider-api
-        run: cd packages/mcp-provider-api && npm publish --access public --ignore-scripts || echo "Already published, skipping"
+        run: cd packages/mcp-provider-api && npm publish --access public --provenance --ignore-scripts
 
       - name: Publish @dormon/mcp-provider-dx-core
-        run: cd packages/mcp-provider-dx-core && npm publish --access public --ignore-scripts || echo "Already published, skipping"
+        run: cd packages/mcp-provider-dx-core && npm publish --access public --provenance --ignore-scripts
 
       - name: Publish @dormon/salesforce-mcp
-        run: cd packages/mcp && npm publish --access public --ignore-scripts || echo "Already published, skipping"
+        run: cd packages/mcp && npm publish --access public --provenance --ignore-scripts
 
       - name: Commit version bump back to main
         run: |
